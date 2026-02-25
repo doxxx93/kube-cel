@@ -12,7 +12,7 @@ use std::sync::Arc;
 pub fn register(ctx: &mut Context<'_>) {
     ctx.add_function("isSorted", is_sorted);
     ctx.add_function("sum", sum);
-    // Note: min/max are already built-in to cel-interpreter as variadic functions.
+    // Note: min/max are already built-in to the cel crate as variadic functions.
     // We register list-member versions here that operate on `<list>.min()` / `<list>.max()`.
     ctx.add_function("min", list_min);
     ctx.add_function("max", list_max);

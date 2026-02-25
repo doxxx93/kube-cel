@@ -1,7 +1,7 @@
-//! Kubernetes CEL extension functions for `cel-interpreter`.
+//! Kubernetes CEL extension functions for the `cel` crate.
 //!
 //! This crate provides the Kubernetes-specific CEL (Common Expression Language) functions
-//! that are available in Kubernetes CRD validation rules, built on top of `cel-interpreter`.
+//! that are available in Kubernetes CRD validation rules, built on top of the `cel` crate.
 //!
 //! # Usage
 //!

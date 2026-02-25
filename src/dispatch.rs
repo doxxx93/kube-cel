@@ -1,6 +1,6 @@
 //! Runtime type dispatch for CEL functions with name collisions.
 //!
-//! cel-interpreter registers functions by name only (no typed overloads).
+//! The `cel` crate registers functions by name only (no typed overloads).
 //! When the same function name applies to multiple types (e.g., `indexOf` for
 //! both strings and lists), this module provides unified dispatch functions
 //! that route to the correct implementation based on the runtime type of `this`.
