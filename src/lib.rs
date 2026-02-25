@@ -1,0 +1,122 @@
+//! Kubernetes CEL extension functions for `cel-interpreter`.
+//!
+//! This crate provides the Kubernetes-specific CEL (Common Expression Language) functions
+//! that are available in Kubernetes CRD validation rules, built on top of `cel-interpreter`.
+//!
+//! # Usage
+//!
+//! ```rust
+//! use cel::Context;
+//! use kube_cel::register_all;
+//!
+//! let mut ctx = Context::default();
+//! register_all(&mut ctx);
+//! ```
+
+#[cfg(feature = "strings")]
+pub mod strings;
+
+#[cfg(feature = "lists")]
+pub mod lists;
+
+#[cfg(feature = "sets")]
+pub mod sets;
+
+#[cfg(feature = "regex_funcs")]
+pub mod regex_funcs;
+
+#[cfg(feature = "urls")]
+pub mod urls;
+
+#[cfg(feature = "ip")]
+pub mod ip;
+
+mod dispatch;
+
+/// Register all available Kubernetes CEL extension functions into the given context.
+pub fn register_all(ctx: &mut cel::Context<'_>) {
+    #[cfg(feature = "strings")]
+    strings::register(ctx);
+
+    #[cfg(feature = "lists")]
+    lists::register(ctx);
+
+    #[cfg(feature = "sets")]
+    sets::register(ctx);
+
+    #[cfg(feature = "regex_funcs")]
+    regex_funcs::register(ctx);
+
+    #[cfg(feature = "urls")]
+    urls::register(ctx);
+
+    #[cfg(feature = "ip")]
+    ip::register(ctx);
+
+    // Must be last: overwrites single-type registrations with unified dispatch
+    dispatch::register(ctx);
+}
+
+#[cfg(test)]
+mod tests {
+    use cel::{Context, Program, Value};
+    use std::sync::Arc;
+
+    use super::*;
+
+    fn eval(expr: &str) -> Value {
+        let mut ctx = Context::default();
+        register_all(&mut ctx);
+        Program::compile(expr).unwrap().execute(&ctx).unwrap()
+    }
+
+    #[test]
+    fn test_integration_strings() {
+        assert_eq!(eval("'hello'.charAt(1)"), Value::String(Arc::new("e".into())));
+        assert_eq!(eval("'HELLO'.lowerAscii()"), Value::String(Arc::new("hello".into())));
+        assert_eq!(eval("'  hello  '.trim()"), Value::String(Arc::new("hello".into())));
+    }
+
+    #[test]
+    fn test_integration_lists() {
+        assert_eq!(eval("[1, 2, 3].isSorted()"), Value::Bool(true));
+        assert_eq!(eval("[3, 1, 2].isSorted()"), Value::Bool(false));
+        assert_eq!(eval("[1, 2, 3].sum()"), Value::Int(6));
+    }
+
+    #[test]
+    fn test_integration_sets() {
+        assert_eq!(eval("sets.contains([1, 2, 3], [1, 2])"), Value::Bool(true));
+        assert_eq!(eval("sets.intersects([1, 2], [2, 3])"), Value::Bool(true));
+    }
+
+    #[test]
+    fn test_integration_regex() {
+        assert_eq!(
+            eval("'hello world'.find('[a-z]+')"),
+            Value::String(Arc::new("hello".into()))
+        );
+    }
+
+    #[test]
+    fn test_dispatch_index_of_string() {
+        assert_eq!(eval("'hello world'.indexOf('world')"), Value::Int(6));
+        assert_eq!(eval("'hello'.indexOf('x')"), Value::Int(-1));
+    }
+
+    #[test]
+    fn test_dispatch_index_of_list() {
+        assert_eq!(eval("[1, 2, 3].indexOf(2)"), Value::Int(1));
+        assert_eq!(eval("[1, 2, 3].indexOf(4)"), Value::Int(-1));
+    }
+
+    #[test]
+    fn test_dispatch_last_index_of_string() {
+        assert_eq!(eval("'abcabc'.lastIndexOf('abc')"), Value::Int(3));
+    }
+
+    #[test]
+    fn test_dispatch_last_index_of_list() {
+        assert_eq!(eval("[1, 2, 3, 2].lastIndexOf(2)"), Value::Int(3));
+    }
+}
