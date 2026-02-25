@@ -40,7 +40,7 @@ impl std::error::Error for ValidationError {}
 /// Walks the OpenAPI schema tree, compiles `x-kubernetes-validations` rules at
 /// each node, and evaluates them against the corresponding object values.
 ///
-/// For repeated validation against the same schema, use [`compile_schema`] +
+/// For repeated validation against the same schema, use [`compile_schema`](crate::compilation::compile_schema) +
 /// [`validate_compiled`](Validator::validate_compiled) to avoid re-compilation.
 pub struct Validator {
     _private: (),
@@ -55,7 +55,7 @@ impl Validator {
     /// Validate an object against a CRD schema's CEL validation rules.
     ///
     /// Compiles rules on each call. For repeated validation against the same
-    /// schema, prefer [`compile_schema`] + [`validate_compiled`](Self::validate_compiled).
+    /// schema, prefer [`compile_schema`](crate::compilation::compile_schema) + [`validate_compiled`](Self::validate_compiled).
     pub fn validate(
         &self,
         schema: &serde_json::Value,
@@ -69,7 +69,7 @@ impl Validator {
 
     /// Validate an object using a pre-compiled schema tree.
     ///
-    /// Use [`compile_schema`] to build the [`CompiledSchema`], then call this
+    /// Use [`compile_schema`](crate::compilation::compile_schema) to build the [`CompiledSchema`], then call this
     /// method for each object to validate — rules are compiled only once.
     pub fn validate_compiled(
         &self,

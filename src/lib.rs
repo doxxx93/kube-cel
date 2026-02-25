@@ -12,6 +12,35 @@
 //! let mut ctx = Context::default();
 //! register_all(&mut ctx);
 //! ```
+//!
+//! # CRD Validation Pipeline (feature = `validation`)
+//!
+//! Compile and evaluate `x-kubernetes-validations` CEL rules client-side,
+//! without an API server.
+//!
+//! ```toml
+//! kube-cel = { version = "0.2", features = ["validation"] }
+//! ```
+//!
+//! ```rust,ignore
+//! use kube_cel::validation::Validator;
+//! use serde_json::json;
+//!
+//! let schema = json!({
+//!     "type": "object",
+//!     "x-kubernetes-validations": [
+//!         {"rule": "self.replicas >= 0", "message": "must be non-negative"}
+//!     ],
+//!     "properties": { "replicas": {"type": "integer"} }
+//! });
+//!
+//! let object = json!({"replicas": -1});
+//! let errors = Validator::new().validate(&schema, &object, None);
+//! assert_eq!(errors.len(), 1);
+//! ```
+//!
+//! For repeated validation against the same schema, pre-compile with
+//! [`compilation::compile_schema`] and use [`validation::Validator::validate_compiled`].
 
 #[cfg(feature = "strings")]
 pub mod strings;
