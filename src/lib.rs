@@ -40,6 +40,9 @@ pub mod format;
 #[cfg(feature = "quantity")]
 pub mod quantity;
 
+#[cfg(feature = "validation")]
+pub mod values;
+
 mod dispatch;
 
 /// Register all available Kubernetes CEL extension functions into the given context.
