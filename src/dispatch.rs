@@ -14,9 +14,23 @@ use cel::{Context, ExecutionError, ResolveResult};
 pub fn register(ctx: &mut Context<'_>) {
     ctx.add_function("indexOf", index_of);
     ctx.add_function("lastIndexOf", last_index_of);
+
+    // Comparison/arithmetic: shared between semver_funcs and quantity
+    ctx.add_function("isGreaterThan", is_greater_than);
+    ctx.add_function("isLessThan", is_less_than);
+    ctx.add_function("compareTo", compare_to);
+
+    #[cfg(feature = "quantity")]
+    {
+        ctx.add_function("add", add);
+        ctx.add_function("sub", sub);
+    }
 }
 
-/// `indexOf` — dispatches to string or list implementation.
+// ---------------------------------------------------------------------------
+// indexOf / lastIndexOf
+// ---------------------------------------------------------------------------
+
 fn index_of(This(this): This<Value>, Arguments(args): Arguments) -> ResolveResult {
     match this {
         #[cfg(feature = "strings")]
@@ -32,7 +46,6 @@ fn index_of(This(this): This<Value>, Arguments(args): Arguments) -> ResolveResul
     }
 }
 
-/// `lastIndexOf` — dispatches to string or list implementation.
 fn last_index_of(This(this): This<Value>, Arguments(args): Arguments) -> ResolveResult {
     match this {
         #[cfg(feature = "strings")]
@@ -46,4 +59,85 @@ fn last_index_of(This(this): This<Value>, Arguments(args): Arguments) -> Resolve
             format!("lastIndexOf not supported on type {:?}", this.type_of()),
         )),
     }
+}
+
+// ---------------------------------------------------------------------------
+// isGreaterThan / isLessThan / compareTo
+// ---------------------------------------------------------------------------
+
+fn is_greater_than(This(this): This<Value>, Arguments(args): Arguments) -> ResolveResult {
+    let arg = args.first().cloned().ok_or_else(|| {
+        ExecutionError::function_error("isGreaterThan", "missing argument")
+    })?;
+
+    match &this {
+        #[cfg(feature = "semver_funcs")]
+        Value::Opaque(o) if o.downcast_ref::<crate::semver_funcs::KubeSemver>().is_some() => {
+            crate::semver_funcs::semver_is_greater_than(This(this), arg)
+        }
+        #[cfg(feature = "quantity")]
+        Value::Opaque(o) if o.downcast_ref::<crate::quantity::KubeQuantity>().is_some() => {
+            crate::quantity::cel_is_greater_than(This(this), arg)
+        }
+        _ => Err(ExecutionError::function_error(
+            "isGreaterThan",
+            format!("isGreaterThan not supported on type {:?}", this.type_of()),
+        )),
+    }
+}
+
+fn is_less_than(This(this): This<Value>, Arguments(args): Arguments) -> ResolveResult {
+    let arg = args.first().cloned().ok_or_else(|| {
+        ExecutionError::function_error("isLessThan", "missing argument")
+    })?;
+
+    match &this {
+        #[cfg(feature = "semver_funcs")]
+        Value::Opaque(o) if o.downcast_ref::<crate::semver_funcs::KubeSemver>().is_some() => {
+            crate::semver_funcs::semver_is_less_than(This(this), arg)
+        }
+        #[cfg(feature = "quantity")]
+        Value::Opaque(o) if o.downcast_ref::<crate::quantity::KubeQuantity>().is_some() => {
+            crate::quantity::cel_is_less_than(This(this), arg)
+        }
+        _ => Err(ExecutionError::function_error(
+            "isLessThan",
+            format!("isLessThan not supported on type {:?}", this.type_of()),
+        )),
+    }
+}
+
+fn compare_to(This(this): This<Value>, Arguments(args): Arguments) -> ResolveResult {
+    let arg = args.first().cloned().ok_or_else(|| {
+        ExecutionError::function_error("compareTo", "missing argument")
+    })?;
+
+    match &this {
+        #[cfg(feature = "semver_funcs")]
+        Value::Opaque(o) if o.downcast_ref::<crate::semver_funcs::KubeSemver>().is_some() => {
+            crate::semver_funcs::semver_compare_to(This(this), arg)
+        }
+        #[cfg(feature = "quantity")]
+        Value::Opaque(o) if o.downcast_ref::<crate::quantity::KubeQuantity>().is_some() => {
+            crate::quantity::cel_compare_to(This(this), arg)
+        }
+        _ => Err(ExecutionError::function_error(
+            "compareTo",
+            format!("compareTo not supported on type {:?}", this.type_of()),
+        )),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// add / sub (quantity only, but accepts Quantity or int)
+// ---------------------------------------------------------------------------
+
+#[cfg(feature = "quantity")]
+fn add(This(this): This<Value>, Arguments(args): Arguments) -> ResolveResult {
+    crate::quantity::cel_add(This(this), Arguments(args))
+}
+
+#[cfg(feature = "quantity")]
+fn sub(This(this): This<Value>, Arguments(args): Arguments) -> ResolveResult {
+    crate::quantity::cel_sub(This(this), Arguments(args))
 }

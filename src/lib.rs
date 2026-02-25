@@ -31,6 +31,15 @@ pub mod urls;
 #[cfg(feature = "ip")]
 pub mod ip;
 
+#[cfg(feature = "semver_funcs")]
+pub mod semver_funcs;
+
+#[cfg(feature = "format")]
+pub mod format;
+
+#[cfg(feature = "quantity")]
+pub mod quantity;
+
 mod dispatch;
 
 /// Register all available Kubernetes CEL extension functions into the given context.
@@ -52,6 +61,15 @@ pub fn register_all(ctx: &mut cel::Context<'_>) {
 
     #[cfg(feature = "ip")]
     ip::register(ctx);
+
+    #[cfg(feature = "semver_funcs")]
+    semver_funcs::register(ctx);
+
+    #[cfg(feature = "format")]
+    format::register(ctx);
+
+    #[cfg(feature = "quantity")]
+    quantity::register(ctx);
 
     // Must be last: overwrites single-type registrations with unified dispatch
     dispatch::register(ctx);
@@ -118,5 +136,27 @@ mod tests {
     #[test]
     fn test_dispatch_last_index_of_list() {
         assert_eq!(eval("[1, 2, 3, 2].lastIndexOf(2)"), Value::Int(3));
+    }
+
+    #[test]
+    fn test_integration_format() {
+        assert_eq!(
+            eval("'hello %s'.format(['world'])"),
+            Value::String(Arc::new("hello world".into()))
+        );
+        assert_eq!(
+            eval("'%d items'.format([5])"),
+            Value::String(Arc::new("5 items".into()))
+        );
+    }
+
+    #[test]
+    fn test_integration_semver() {
+        assert_eq!(eval("isSemver('1.2.3')"), Value::Bool(true));
+        assert_eq!(eval("semver('1.2.3').major()"), Value::Int(1));
+        assert_eq!(
+            eval("semver('2.0.0').isGreaterThan(semver('1.0.0'))"),
+            Value::Bool(true)
+        );
     }
 }
