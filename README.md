@@ -37,6 +37,51 @@ let result = Program::compile("semver('1.2.3').isLessThan(semver('2.0.0'))")
     .unwrap().execute(&ctx).unwrap();
 ```
 
+## CRD Validation Pipeline
+
+With the `validation` feature, you can compile and evaluate `x-kubernetes-validations` CEL rules client-side — no API server required.
+
+```toml
+[dependencies]
+kube-cel = { version = "0.1", features = ["validation"] }
+```
+
+```rust
+use kube_cel::validation::Validator;
+use serde_json::json;
+
+let schema = json!({
+    "type": "object",
+    "properties": {
+        "spec": {
+            "type": "object",
+            "properties": {
+                "replicas": {
+                    "type": "integer",
+                    "x-kubernetes-validations": [
+                        {"rule": "self >= 0", "message": "replicas must be non-negative"}
+                    ]
+                }
+            },
+            "x-kubernetes-validations": [
+                {"rule": "self.replicas >= 1", "message": "at least one replica"}
+            ]
+        }
+    }
+});
+
+let object = json!({"spec": {"replicas": -1}});
+
+let validator = Validator::new();
+let errors = validator.validate(&schema, &object, None);
+
+assert_eq!(errors.len(), 2);
+assert_eq!(errors[0].field_path, "spec");
+assert_eq!(errors[1].field_path, "spec.replicas");
+```
+
+The validator walks the schema tree, compiles rules at each node, and evaluates them with `self` bound to the corresponding object value. Transition rules (referencing `oldSelf`) are supported by passing `old_object`.
+
 ## Supported Functions
 
 ### Strings
@@ -81,6 +126,7 @@ All features are enabled by default. Disable with `default-features = false` and
 | `semver_funcs` | `semver` | Semantic versioning |
 | `format` | - | String formatting |
 | `quantity` | - | Kubernetes resource quantities |
+| `validation` | `serde_json`, `serde` | CRD validation pipeline (compile + evaluate `x-kubernetes-validations`) |
 
 ## Related
 
