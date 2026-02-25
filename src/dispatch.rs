@@ -31,6 +31,7 @@ pub fn register(ctx: &mut Context<'_>) {
 // indexOf / lastIndexOf
 // ---------------------------------------------------------------------------
 
+#[allow(unused_variables)]
 fn index_of(This(this): This<Value>, Arguments(args): Arguments) -> ResolveResult {
     match this {
         #[cfg(feature = "strings")]
@@ -46,6 +47,7 @@ fn index_of(This(this): This<Value>, Arguments(args): Arguments) -> ResolveResul
     }
 }
 
+#[allow(unused_variables)]
 fn last_index_of(This(this): This<Value>, Arguments(args): Arguments) -> ResolveResult {
     match this {
         #[cfg(feature = "strings")]
@@ -65,6 +67,7 @@ fn last_index_of(This(this): This<Value>, Arguments(args): Arguments) -> Resolve
 // isGreaterThan / isLessThan / compareTo
 // ---------------------------------------------------------------------------
 
+#[allow(unused_variables)]
 fn is_greater_than(This(this): This<Value>, Arguments(args): Arguments) -> ResolveResult {
     let arg = args
         .first()
@@ -90,6 +93,7 @@ fn is_greater_than(This(this): This<Value>, Arguments(args): Arguments) -> Resol
     }
 }
 
+#[allow(unused_variables)]
 fn is_less_than(This(this): This<Value>, Arguments(args): Arguments) -> ResolveResult {
     let arg = args
         .first()
@@ -115,6 +119,7 @@ fn is_less_than(This(this): This<Value>, Arguments(args): Arguments) -> ResolveR
     }
 }
 
+#[allow(unused_variables)]
 fn compare_to(This(this): This<Value>, Arguments(args): Arguments) -> ResolveResult {
     let arg = args
         .first()
