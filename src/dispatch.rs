@@ -158,3 +158,58 @@ fn add(This(this): This<Value>, Arguments(args): Arguments) -> ResolveResult {
 fn sub(This(this): This<Value>, Arguments(args): Arguments) -> ResolveResult {
     crate::quantity::cel_sub(This(this), Arguments(args))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use cel::Program;
+
+    #[allow(dead_code)]
+    fn eval_err(expr: &str) -> cel::ExecutionError {
+        let mut ctx = Context::default();
+        register(&mut ctx);
+        #[cfg(feature = "strings")]
+        crate::strings::register(&mut ctx);
+        #[cfg(feature = "lists")]
+        crate::lists::register(&mut ctx);
+        #[cfg(feature = "semver_funcs")]
+        crate::semver_funcs::register(&mut ctx);
+        #[cfg(feature = "quantity")]
+        crate::quantity::register(&mut ctx);
+        Program::compile(expr)
+            .unwrap()
+            .execute(&ctx)
+            .unwrap_err()
+    }
+
+    #[test]
+    #[cfg(feature = "strings")]
+    fn test_index_of_unsupported_type() {
+        // indexOf on a non-string, non-list type should error
+        eval_err("true.indexOf('x')");
+    }
+
+    #[test]
+    #[cfg(feature = "strings")]
+    fn test_last_index_of_unsupported_type() {
+        eval_err("true.lastIndexOf('x')");
+    }
+
+    #[test]
+    #[cfg(feature = "semver_funcs")]
+    fn test_is_greater_than_unsupported_type() {
+        eval_err("'hello'.isGreaterThan('world')");
+    }
+
+    #[test]
+    #[cfg(feature = "semver_funcs")]
+    fn test_is_less_than_unsupported_type() {
+        eval_err("'hello'.isLessThan('world')");
+    }
+
+    #[test]
+    #[cfg(feature = "semver_funcs")]
+    fn test_compare_to_unsupported_type() {
+        eval_err("'hello'.compareTo('world')");
+    }
+}

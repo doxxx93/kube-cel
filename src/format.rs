@@ -412,4 +412,64 @@ mod tests {
         let result = Program::compile("'%z'.format([1])").unwrap().execute(&ctx);
         assert!(result.is_err());
     }
+
+    // --- Error & edge case tests ---
+
+    fn eval_err(expr: &str) -> cel::ExecutionError {
+        let mut ctx = Context::default();
+        register(&mut ctx);
+        Program::compile(expr)
+            .unwrap()
+            .execute(&ctx)
+            .unwrap_err()
+    }
+
+    #[test]
+    fn test_format_trailing_percent() {
+        eval_err("'hello%'.format([])");
+    }
+
+    #[test]
+    fn test_format_d_type_error() {
+        eval_err("'%d'.format([1.5])");
+        eval_err("'%d'.format([true])");
+    }
+
+    #[test]
+    fn test_format_b_type_error() {
+        eval_err("'%b'.format([1.5])");
+    }
+
+    #[test]
+    fn test_format_o_type_error() {
+        eval_err("'%o'.format([1.5])");
+    }
+
+    #[test]
+    fn test_format_x_uppercase_string() {
+        assert_eq!(eval_str("'%X'.format(['AB'])"), "4142");
+    }
+
+    #[test]
+    fn test_format_s_null() {
+        assert_eq!(eval_str("'%s'.format([null])"), "null");
+    }
+
+    #[test]
+    fn test_format_s_float() {
+        assert_eq!(eval_str("'%s'.format([1.0])"), "1.0");
+        assert_eq!(eval_str("'%s'.format([1.5])"), "1.5");
+    }
+
+    #[test]
+    fn test_format_f_int() {
+        // %f should accept int as well
+        assert_eq!(eval_str("'%.1f'.format([5])"), "5.0");
+    }
+
+    #[test]
+    fn test_format_extra_args_ignored() {
+        // Extra arguments beyond what's needed should be silently ignored
+        assert_eq!(eval_str("'%s'.format(['a', 'b'])"), "a");
+    }
 }

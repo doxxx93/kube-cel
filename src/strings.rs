@@ -353,4 +353,107 @@ mod tests {
             Value::String(Arc::new("\"hello\"".into()))
         );
     }
+
+    // --- Error & edge case tests ---
+
+    fn eval_err(expr: &str) -> cel::ExecutionError {
+        let mut ctx = Context::default();
+        register(&mut ctx);
+        crate::dispatch::register(&mut ctx);
+        Program::compile(expr)
+            .unwrap()
+            .execute(&ctx)
+            .unwrap_err()
+    }
+
+    #[test]
+    fn test_char_at_out_of_bounds() {
+        eval_err("'hello'.charAt(-1)");
+        eval_err("'hello'.charAt(5)");
+    }
+
+    #[test]
+    fn test_char_at_unicode() {
+        assert_eq!(
+            eval("'héllo'.charAt(1)"),
+            Value::String(Arc::new("é".into()))
+        );
+    }
+
+    #[test]
+    fn test_index_of_with_offset() {
+        // offset past first occurrence
+        assert_eq!(eval("'abcabc'.indexOf('abc', 1)"), Value::Int(3));
+        // negative offset clamps to 0
+        assert_eq!(eval("'hello'.indexOf('h', -5)"), Value::Int(0));
+        // offset past end
+        assert_eq!(eval("'hello'.indexOf('h', 100)"), Value::Int(-1));
+    }
+
+    #[test]
+    fn test_last_index_of_with_offset() {
+        assert_eq!(eval("'abcabc'.lastIndexOf('abc', 3)"), Value::Int(0));
+        // empty search returns the offset
+        assert_eq!(eval("'hello'.lastIndexOf('', 3)"), Value::Int(3));
+    }
+
+    #[test]
+    fn test_substring_two_args() {
+        assert_eq!(
+            eval("'hello'.substring(1, 3)"),
+            Value::String(Arc::new("el".into()))
+        );
+    }
+
+    #[test]
+    fn test_substring_errors() {
+        eval_err("'hello'.substring(-1)");
+        eval_err("'hello'.substring(10)");
+        eval_err("'hello'.substring(3, 2)"); // end < start
+        eval_err("'hello'.substring(0, 10)"); // end > len
+    }
+
+    #[test]
+    fn test_replace_with_count() {
+        assert_eq!(
+            eval("'aaa'.replace('a', 'b', 2)"),
+            Value::String(Arc::new("bba".into()))
+        );
+        // count 0 replaces nothing
+        assert_eq!(
+            eval("'aaa'.replace('a', 'b', 0)"),
+            Value::String(Arc::new("aaa".into()))
+        );
+    }
+
+    #[test]
+    fn test_split_with_limit() {
+        assert_eq!(
+            eval("'a,b,c'.split(',', 2)"),
+            Value::List(Arc::new(vec![
+                Value::String(Arc::new("a".into())),
+                Value::String(Arc::new("b,c".into())),
+            ]))
+        );
+    }
+
+    #[test]
+    fn test_join_no_separator() {
+        assert_eq!(
+            eval("['a', 'b', 'c'].join()"),
+            Value::String(Arc::new("abc".into()))
+        );
+    }
+
+    #[test]
+    fn test_strings_quote_escapes() {
+        assert_eq!(
+            eval("strings.quote('a\\nb')"),
+            Value::String(Arc::new("\"a\\nb\"".into()))
+        );
+        assert_eq!(
+            eval("strings.quote('a\\tb')"),
+            Value::String(Arc::new("\"a\\tb\"".into()))
+        );
+    }
 }

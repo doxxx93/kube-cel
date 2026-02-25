@@ -627,4 +627,107 @@ mod tests {
         let q = parse_quantity("0").unwrap();
         assert_eq!(q.to_string(), "0");
     }
+
+    // --- Error & edge case tests ---
+
+    fn eval_err(expr: &str) -> cel::ExecutionError {
+        let mut ctx = Context::default();
+        register(&mut ctx);
+        crate::dispatch::register(&mut ctx);
+        Program::compile(expr)
+            .unwrap()
+            .execute(&ctx)
+            .unwrap_err()
+    }
+
+    #[test]
+    fn test_quantity_invalid_error() {
+        eval_err("quantity('')");
+        eval_err("quantity('not-a-quantity')");
+    }
+
+    #[test]
+    fn test_unknown_suffix() {
+        assert_eq!(eval("isQuantity('5Z')"), Value::Bool(false));
+        eval_err("quantity('5Z')");
+    }
+
+    #[test]
+    fn test_as_integer_non_integer() {
+        eval_err("quantity('1.5').asInteger()");
+        eval_err("quantity('500m').asInteger()");
+    }
+
+    #[test]
+    fn test_sub_negative_result() {
+        assert_eq!(
+            eval("quantity('100').sub(quantity('200')).sign()"),
+            Value::Int(-1)
+        );
+        assert_eq!(
+            eval("quantity('100').sub(quantity('200')).asInteger()"),
+            Value::Int(-100)
+        );
+    }
+
+    #[test]
+    fn test_parse_remaining_si_suffixes() {
+        // Decimal SI: u, T, P, E
+        assert_eq!(
+            eval("quantity('1u').asApproximateFloat()"),
+            Value::Float(1e-6)
+        );
+        assert_eq!(eval("quantity('1T').asInteger()"), Value::Int(1_000_000_000_000));
+        assert_eq!(
+            eval("quantity('1P').asInteger()"),
+            Value::Int(1_000_000_000_000_000)
+        );
+        assert_eq!(
+            eval("quantity('1E').asInteger()"),
+            Value::Int(1_000_000_000_000_000_000)
+        );
+    }
+
+    #[test]
+    fn test_parse_remaining_binary_si() {
+        // Ti, Pi, Ei
+        assert_eq!(
+            eval("quantity('1Ti').asInteger()"),
+            Value::Int(1 << 40)
+        );
+        assert_eq!(
+            eval("quantity('1Pi').asInteger()"),
+            Value::Int(1 << 50)
+        );
+    }
+
+    #[test]
+    fn test_equal_comparison() {
+        assert_eq!(
+            eval("quantity('1k').isGreaterThan(quantity('1000'))"),
+            Value::Bool(false)
+        );
+        assert_eq!(
+            eval("quantity('1k').isLessThan(quantity('1000'))"),
+            Value::Bool(false)
+        );
+    }
+
+    #[test]
+    fn test_display_negative() {
+        let q = parse_quantity("-500m").unwrap();
+        assert_eq!(q.to_string(), "-0.5");
+
+        let q = parse_quantity("-1500").unwrap();
+        assert_eq!(q.to_string(), "-1500");
+    }
+
+    #[test]
+    fn test_as_integer_integer_via_scale() {
+        // 500m + 500m = 1000m = 1 (integer)
+        assert_eq!(
+            eval("quantity('500m').add(quantity('500m')).asInteger()"),
+            Value::Int(1)
+        );
+    }
 }

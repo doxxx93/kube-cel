@@ -225,4 +225,47 @@ mod tests {
             Value::Bool(true)
         );
     }
+
+    // --- Error & edge case tests ---
+
+    fn eval_err(expr: &str) -> cel::ExecutionError {
+        let mut ctx = Context::default();
+        register(&mut ctx);
+        crate::dispatch::register(&mut ctx);
+        Program::compile(expr)
+            .unwrap()
+            .execute(&ctx)
+            .unwrap_err()
+    }
+
+    #[test]
+    fn test_semver_invalid_error() {
+        eval_err("semver('not-a-version')");
+    }
+
+    #[test]
+    fn test_leading_capital_v() {
+        assert_eq!(eval("semver('V1.2.3').major()"), Value::Int(1));
+    }
+
+    #[test]
+    fn test_equal_comparison() {
+        assert_eq!(
+            eval("semver('1.0.0').isGreaterThan(semver('1.0.0'))"),
+            Value::Bool(false)
+        );
+        assert_eq!(
+            eval("semver('1.0.0').isLessThan(semver('1.0.0'))"),
+            Value::Bool(false)
+        );
+    }
+
+    #[test]
+    fn test_partial_version_with_pre_release() {
+        // "1.2-alpha" should pad to "1.2.0-alpha"
+        assert_eq!(
+            eval("semver('1.2-alpha').isLessThan(semver('1.2.0'))"),
+            Value::Bool(true)
+        );
+    }
 }

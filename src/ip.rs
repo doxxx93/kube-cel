@@ -353,4 +353,144 @@ mod tests {
             Value::Int(24)
         );
     }
+
+    // --- Error & edge case tests ---
+
+    fn eval_err(expr: &str) -> cel::ExecutionError {
+        let mut ctx = Context::default();
+        register(&mut ctx);
+        Program::compile(expr)
+            .unwrap()
+            .execute(&ctx)
+            .unwrap_err()
+    }
+
+    #[test]
+    fn test_ip_rejects_ipv4_mapped_ipv6() {
+        assert_eq!(eval("isIP('::ffff:1.2.3.4')"), Value::Bool(false));
+        eval_err("ip('::ffff:1.2.3.4')");
+    }
+
+    #[test]
+    fn test_ip_rejects_zone_id() {
+        assert_eq!(eval("isIP('fe80::1%eth0')"), Value::Bool(false));
+        eval_err("ip('fe80::1%eth0')");
+    }
+
+    #[test]
+    fn test_ip_is_link_local_multicast() {
+        // IPv4 link-local multicast: 224.0.0.x
+        assert_eq!(
+            eval("ip('224.0.0.1').isLinkLocalMulticast()"),
+            Value::Bool(true)
+        );
+        // Global multicast, not link-local
+        assert_eq!(
+            eval("ip('224.0.1.1').isLinkLocalMulticast()"),
+            Value::Bool(false)
+        );
+        // IPv6 link-local multicast: ff02::x
+        assert_eq!(
+            eval("ip('ff02::1').isLinkLocalMulticast()"),
+            Value::Bool(true)
+        );
+        // Not link-local multicast
+        assert_eq!(
+            eval("ip('ff05::1').isLinkLocalMulticast()"),
+            Value::Bool(false)
+        );
+    }
+
+    #[test]
+    fn test_ip_is_link_local_unicast() {
+        // IPv4 link-local: 169.254.x.x
+        assert_eq!(
+            eval("ip('169.254.1.1').isLinkLocalUnicast()"),
+            Value::Bool(true)
+        );
+        assert_eq!(
+            eval("ip('169.253.1.1').isLinkLocalUnicast()"),
+            Value::Bool(false)
+        );
+        // IPv6 link-local: fe80::x
+        assert_eq!(
+            eval("ip('fe80::1').isLinkLocalUnicast()"),
+            Value::Bool(true)
+        );
+        assert_eq!(
+            eval("ip('fec0::1').isLinkLocalUnicast()"),
+            Value::Bool(false)
+        );
+    }
+
+    #[test]
+    fn test_ip_global_unicast_edge_cases() {
+        // Link-local unicast should not be global
+        assert_eq!(
+            eval("ip('169.254.1.1').isGlobalUnicast()"),
+            Value::Bool(false)
+        );
+        // Multicast should not be global
+        assert_eq!(
+            eval("ip('224.0.0.1').isGlobalUnicast()"),
+            Value::Bool(false)
+        );
+        // IPv6 link-local should not be global
+        assert_eq!(
+            eval("ip('fe80::1').isGlobalUnicast()"),
+            Value::Bool(false)
+        );
+    }
+
+    #[test]
+    fn test_cidr_masked() {
+        // 192.168.1.5/24 masked → 192.168.1.0/24
+        let result = eval("cidr('192.168.1.5/24').masked().prefixLength()");
+        assert_eq!(result, Value::Int(24));
+
+        // containsIP after masking should work for addresses in the same /24
+        assert_eq!(
+            eval("cidr('192.168.1.5/24').masked().containsIP('192.168.1.1')"),
+            Value::Bool(true)
+        );
+        // Address outside the /24 should not be contained
+        assert_eq!(
+            eval("cidr('192.168.1.5/24').masked().containsIP('192.168.2.1')"),
+            Value::Bool(false)
+        );
+    }
+
+    #[test]
+    fn test_cidr_contains_itself() {
+        assert_eq!(
+            eval("cidr('10.0.0.0/24').containsCIDR('10.0.0.0/24')"),
+            Value::Bool(true)
+        );
+    }
+
+    #[test]
+    fn test_cidr_ipv6() {
+        assert_eq!(eval("isCIDR('fd00::/8')"), Value::Bool(true));
+        assert_eq!(eval("cidr('fd00::/8').prefixLength()"), Value::Int(8));
+        assert_eq!(
+            eval("cidr('fd00::/8').containsIP('fd00::1')"),
+            Value::Bool(true)
+        );
+    }
+
+    #[test]
+    fn test_cidr_rejects_ipv4_mapped_ipv6() {
+        assert_eq!(eval("isCIDR('::ffff:1.2.3.4/96')"), Value::Bool(false));
+    }
+
+    #[test]
+    fn test_ip_is_canonical_ipv6() {
+        // Non-canonical IPv6
+        assert_eq!(
+            eval("ip.isCanonical('0:0:0:0:0:0:0:1')"),
+            Value::Bool(false)
+        );
+        // Canonical form
+        assert_eq!(eval("ip.isCanonical('::1')"), Value::Bool(true));
+    }
 }

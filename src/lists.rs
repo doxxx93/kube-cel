@@ -296,4 +296,107 @@ mod tests {
             Value::List(Arc::new(vec![Value::Int(1), Value::Int(2), Value::Int(3)]))
         );
     }
+
+    // --- Error & edge case tests ---
+
+    fn eval_err(expr: &str) -> cel::ExecutionError {
+        let mut ctx = Context::default();
+        register(&mut ctx);
+        crate::dispatch::register(&mut ctx);
+        Program::compile(expr)
+            .unwrap()
+            .execute(&ctx)
+            .unwrap_err()
+    }
+
+    #[test]
+    fn test_min_empty_list() {
+        eval_err("[].min()");
+    }
+
+    #[test]
+    fn test_max_empty_list() {
+        eval_err("[].max()");
+    }
+
+    #[test]
+    fn test_min_max_single_element() {
+        assert_eq!(eval("[42].min()"), Value::Int(42));
+        assert_eq!(eval("[42].max()"), Value::Int(42));
+    }
+
+    #[test]
+    fn test_min_max_strings() {
+        assert_eq!(
+            eval("['c', 'a', 'b'].min()"),
+            Value::String(Arc::new("a".into()))
+        );
+        assert_eq!(
+            eval("['c', 'a', 'b'].max()"),
+            Value::String(Arc::new("c".into()))
+        );
+    }
+
+    #[test]
+    fn test_slice_errors() {
+        eval_err("[1, 2, 3].slice(-1, 2)"); // start < 0
+        eval_err("[1, 2, 3].slice(2, 1)"); // end < start
+        eval_err("[1, 2, 3].slice(0, 5)"); // end > len
+        eval_err("[1, 2, 3].slice(5, 5)"); // start > len
+    }
+
+    #[test]
+    fn test_slice_empty_range() {
+        assert_eq!(
+            eval("[1, 2, 3].slice(2, 2)"),
+            Value::List(Arc::new(vec![]))
+        );
+    }
+
+    #[test]
+    fn test_flatten_mixed() {
+        // Non-list items are kept as-is
+        assert_eq!(
+            eval("[1, [2, 3], 4].flatten()"),
+            Value::List(Arc::new(vec![
+                Value::Int(1),
+                Value::Int(2),
+                Value::Int(3),
+                Value::Int(4),
+            ]))
+        );
+    }
+
+    #[test]
+    fn test_flatten_one_level_only() {
+        // Only flattens one level deep
+        assert_eq!(
+            eval("[[1, [2, 3]]].flatten()"),
+            Value::List(Arc::new(vec![
+                Value::Int(1),
+                Value::List(Arc::new(vec![Value::Int(2), Value::Int(3)])),
+            ]))
+        );
+    }
+
+    #[test]
+    fn test_is_sorted_with_equal_elements() {
+        assert_eq!(eval("[1, 1, 2].isSorted()"), Value::Bool(true));
+    }
+
+    #[test]
+    fn test_distinct_strings() {
+        assert_eq!(
+            eval("['a', 'b', 'a'].distinct()"),
+            Value::List(Arc::new(vec![
+                Value::String(Arc::new("a".into())),
+                Value::String(Arc::new("b".into())),
+            ]))
+        );
+    }
+
+    #[test]
+    fn test_reverse_empty() {
+        assert_eq!(eval("[].reverse()"), Value::List(Arc::new(vec![])));
+    }
 }

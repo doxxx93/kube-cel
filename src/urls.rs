@@ -223,4 +223,85 @@ mod tests {
             Value::String(Arc::new("/my%20path".into()))
         );
     }
+
+    // --- Error & edge case tests ---
+
+    fn eval_err(expr: &str) -> cel::ExecutionError {
+        let mut ctx = Context::default();
+        register(&mut ctx);
+        Program::compile(expr)
+            .unwrap()
+            .execute(&ctx)
+            .unwrap_err()
+    }
+
+    #[test]
+    fn test_url_invalid() {
+        eval_err("url('not a url')");
+    }
+
+    #[test]
+    fn test_absolute_path_scheme() {
+        // Absolute paths should have empty scheme
+        assert_eq!(
+            eval("url('/some/path').getScheme()"),
+            Value::String(Arc::new(String::new()))
+        );
+    }
+
+    #[test]
+    fn test_get_host_no_port() {
+        assert_eq!(
+            eval("url('https://example.com/path').getHost()"),
+            Value::String(Arc::new("example.com".into()))
+        );
+    }
+
+    #[test]
+    fn test_get_port_no_port() {
+        assert_eq!(
+            eval("url('https://example.com').getPort()"),
+            Value::String(Arc::new(String::new()))
+        );
+    }
+
+    #[test]
+    fn test_get_query_multi_value() {
+        let result = eval("url('https://example.com?a=1&a=2&b=3').getQuery()");
+        if let Value::Map(map) = result {
+            let a_key = Key::String(Arc::new("a".into()));
+            let a_val = map.map.get(&a_key).unwrap();
+            assert_eq!(
+                *a_val,
+                Value::List(Arc::new(vec![
+                    Value::String(Arc::new("1".into())),
+                    Value::String(Arc::new("2".into())),
+                ]))
+            );
+        } else {
+            panic!("expected map");
+        }
+    }
+
+    #[test]
+    fn test_get_query_no_query() {
+        let result = eval("url('https://example.com/path').getQuery()");
+        if let Value::Map(map) = result {
+            assert!(map.map.is_empty());
+        } else {
+            panic!("expected map");
+        }
+    }
+
+    #[test]
+    fn test_different_schemes() {
+        assert_eq!(
+            eval("url('http://example.com').getScheme()"),
+            Value::String(Arc::new("http".into()))
+        );
+        assert_eq!(
+            eval("url('ftp://example.com').getScheme()"),
+            Value::String(Arc::new("ftp".into()))
+        );
+    }
 }

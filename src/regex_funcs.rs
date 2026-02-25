@@ -95,4 +95,52 @@ mod tests {
             ]))
         );
     }
+
+    // --- Error & edge case tests ---
+
+    fn eval_err(expr: &str) -> cel::ExecutionError {
+        let mut ctx = Context::default();
+        register(&mut ctx);
+        Program::compile(expr)
+            .unwrap()
+            .execute(&ctx)
+            .unwrap_err()
+    }
+
+    #[test]
+    fn test_find_invalid_regex() {
+        eval_err("'hello'.find('[')");
+    }
+
+    #[test]
+    fn test_find_all_invalid_regex() {
+        eval_err("'hello'.findAll('[')");
+    }
+
+    #[test]
+    fn test_find_all_with_limit() {
+        assert_eq!(
+            eval("'a1b2c3'.findAll('[a-z]', 2)"),
+            Value::List(Arc::new(vec![
+                Value::String(Arc::new("a".into())),
+                Value::String(Arc::new("b".into())),
+            ]))
+        );
+    }
+
+    #[test]
+    fn test_find_all_no_matches() {
+        assert_eq!(
+            eval("'12345'.findAll('[a-z]+')"),
+            Value::List(Arc::new(vec![]))
+        );
+    }
+
+    #[test]
+    fn test_find_all_limit_zero() {
+        assert_eq!(
+            eval("'hello'.findAll('[a-z]+', 0)"),
+            Value::List(Arc::new(vec![]))
+        );
+    }
 }

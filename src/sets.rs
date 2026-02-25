@@ -105,4 +105,36 @@ mod tests {
         assert_eq!(eval("sets.intersects([1, 2], [3, 4])"), Value::Bool(false));
         assert_eq!(eval("sets.intersects([], [1])"), Value::Bool(false));
     }
+
+    // --- Edge case tests ---
+
+    #[test]
+    fn test_equivalent_empty() {
+        assert_eq!(eval("sets.equivalent([], [])"), Value::Bool(true));
+    }
+
+    #[test]
+    fn test_intersects_both_empty() {
+        assert_eq!(eval("sets.intersects([], [])"), Value::Bool(false));
+    }
+
+    #[test]
+    fn test_contains_strings() {
+        assert_eq!(
+            eval("sets.contains(['a', 'b', 'c'], ['a', 'c'])"),
+            Value::Bool(true)
+        );
+        assert_eq!(
+            eval("sets.contains(['a', 'b'], ['d'])"),
+            Value::Bool(false)
+        );
+    }
+
+    #[test]
+    fn test_intersects_strings() {
+        assert_eq!(
+            eval("sets.intersects(['a', 'b'], ['b', 'c'])"),
+            Value::Bool(true)
+        );
+    }
 }
