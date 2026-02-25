@@ -1,0 +1,93 @@
+# kube-cel
+
+[![Crates.io](https://img.shields.io/crates/v/kube-cel.svg)](https://crates.io/crates/kube-cel)
+[![CI](https://github.com/doxxx93/kube-cel/actions/workflows/ci.yml/badge.svg)](https://github.com/doxxx93/kube-cel/actions)
+
+Kubernetes [CEL](https://kubernetes.io/docs/reference/using-api/cel/) extension functions for Rust, built on top of [`cel`](https://crates.io/crates/cel).
+
+Implements the Kubernetes-specific CEL libraries defined in [`k8s.io/apiserver/pkg/cel/library`](https://pkg.go.dev/k8s.io/apiserver/pkg/cel/library) and [`cel-go/ext`](https://pkg.go.dev/github.com/google/cel-go/ext), enabling client-side evaluation of CRD validation rules.
+
+## Installation
+
+```toml
+[dependencies]
+kube-cel = "0.1"
+cel = "0.12"
+```
+
+## Usage
+
+```rust
+use cel::{Context, Program};
+use kube_cel::register_all;
+
+let mut ctx = Context::default();
+register_all(&mut ctx);
+
+// String functions
+let result = Program::compile("'hello'.upperAscii()")
+    .unwrap().execute(&ctx).unwrap();
+
+// Quantity comparison
+let result = Program::compile("quantity('1Gi').isGreaterThan(quantity('500Mi'))")
+    .unwrap().execute(&ctx).unwrap();
+
+// Semver
+let result = Program::compile("semver('1.2.3').isLessThan(semver('2.0.0'))")
+    .unwrap().execute(&ctx).unwrap();
+```
+
+## Supported Functions
+
+### Strings
+`charAt`, `indexOf`, `lastIndexOf`, `lowerAscii`, `upperAscii`, `replace`, `split`, `substring`, `trim`, `join`, `strings.quote`
+
+### Lists
+`isSorted`, `sum`, `min`, `max`, `indexOf`, `lastIndexOf`, `slice`, `flatten`, `reverse`, `distinct`
+
+### Sets
+`sets.contains`, `sets.equivalent`, `sets.intersects`
+
+### Regex
+`find`, `findAll`
+
+### URLs
+`url`, `isURL`, `getScheme`, `getHost`, `getHostname`, `getPort`, `getEscapedPath`, `getQuery`
+
+### IP / CIDR
+`ip`, `isIP`, `ip.isCanonical`, `family`, `isLoopback`, `isUnspecified`, `isLinkLocalMulticast`, `isLinkLocalUnicast`, `isGlobalUnicast`, `cidr`, `isCIDR`, `containsIP`, `containsCIDR`, `prefixLength`, `masked`
+
+### Semver
+`semver`, `isSemver`, `major`, `minor`, `patch`, `isGreaterThan`, `isLessThan`, `compareTo`
+
+### Quantity
+`quantity`, `isQuantity`, `isInteger`, `asInteger`, `asApproximateFloat`, `sign`, `add`, `sub`, `isGreaterThan`, `isLessThan`, `compareTo`
+
+### Format
+`<string>.format(<list>)` with verbs: `%s`, `%d`, `%f`, `%e`, `%b`, `%o`, `%x`, `%X`
+
+## Feature Flags
+
+All features are enabled by default. Disable with `default-features = false` and pick what you need:
+
+| Feature | Dependencies | Description |
+|---------|-------------|-------------|
+| `strings` | - | String extension functions |
+| `lists` | - | List extension functions |
+| `sets` | - | Set operations |
+| `regex_funcs` | `regex` | Regex find/findAll |
+| `urls` | `url` | URL parsing and accessors |
+| `ip` | `ipnet` | IP/CIDR parsing and operations |
+| `semver_funcs` | `semver` | Semantic versioning |
+| `format` | - | String formatting |
+| `quantity` | - | Kubernetes resource quantities |
+
+## Related
+
+- [kube-rs](https://github.com/kube-rs/kube) - Rust Kubernetes client and controller runtime
+- [cel](https://crates.io/crates/cel) - Rust CEL interpreter
+- [Kubernetes CEL docs](https://kubernetes.io/docs/reference/using-api/cel/)
+
+## License
+
+Apache-2.0

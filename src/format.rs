@@ -294,7 +294,10 @@ fn extract_float(val: &Value, verb: char) -> Result<f64, ExecutionError> {
         Value::UInt(n) => Ok(*n as f64),
         _ => Err(ExecutionError::function_error(
             "format",
-            format!("%{verb} requires float, int, or uint, got {:?}", val.type_of()),
+            format!(
+                "%{verb} requires float, int, or uint, got {:?}",
+                val.type_of()
+            ),
         )),
     }
 }
@@ -320,7 +323,10 @@ mod tests {
     #[test]
     fn test_format_s() {
         assert_eq!(eval_str("'hello %s'.format(['world'])"), "hello world");
-        assert_eq!(eval_str("'%s is %s'.format(['age', 'number'])"), "age is number");
+        assert_eq!(
+            eval_str("'%s is %s'.format(['age', 'number'])"),
+            "age is number"
+        );
     }
 
     #[test]
@@ -403,9 +409,7 @@ mod tests {
     fn test_format_unknown_verb() {
         let mut ctx = Context::default();
         register(&mut ctx);
-        let result = Program::compile("'%z'.format([1])")
-            .unwrap()
-            .execute(&ctx);
+        let result = Program::compile("'%z'.format([1])").unwrap().execute(&ctx);
         assert!(result.is_err());
     }
 }

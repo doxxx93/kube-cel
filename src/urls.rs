@@ -58,9 +58,8 @@ fn validate_and_parse(s: &str) -> Result<Url, String> {
 ///
 /// Parses a string into a URL. The string must be an absolute URI or an absolute path.
 fn parse_url(s: Arc<String>) -> ResolveResult {
-    let parsed = validate_and_parse(&s).map_err(|e| {
-        cel::ExecutionError::function_error("url", e)
-    })?;
+    let parsed =
+        validate_and_parse(&s).map_err(|e| cel::ExecutionError::function_error("url", e))?;
     Ok(Value::Opaque(Arc::new(KubeUrl(parsed))))
 }
 
@@ -74,9 +73,9 @@ fn is_url(s: Arc<String>) -> ResolveResult {
 /// Helper to extract KubeUrl from an opaque Value.
 fn extract_url(val: &Value) -> Result<&KubeUrl, cel::ExecutionError> {
     match val {
-        Value::Opaque(o) => o.downcast_ref::<KubeUrl>().ok_or_else(|| {
-            cel::ExecutionError::function_error("url", "expected URL type")
-        }),
+        Value::Opaque(o) => o
+            .downcast_ref::<KubeUrl>()
+            .ok_or_else(|| cel::ExecutionError::function_error("url", "expected URL type")),
         _ => Err(cel::ExecutionError::function_error(
             "url",
             "expected URL type",
@@ -117,7 +116,10 @@ fn get_hostname(This(this): This<Value>) -> ResolveResult {
     let url = extract_url(&this)?;
     let hostname = url.0.host_str().unwrap_or("");
     // Strip IPv6 brackets if present
-    let hostname = hostname.strip_prefix('[').and_then(|s| s.strip_suffix(']')).unwrap_or(hostname);
+    let hostname = hostname
+        .strip_prefix('[')
+        .and_then(|s| s.strip_suffix(']'))
+        .unwrap_or(hostname);
     Ok(Value::String(Arc::new(hostname.to_string())))
 }
 

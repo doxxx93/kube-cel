@@ -93,9 +93,9 @@ fn list_max(This(this): This<Arc<Vec<Value>>>) -> ResolveResult {
 ///
 /// Returns the index of the first occurrence of the value, or -1 if not found.
 pub(crate) fn list_index_of(list: &[Value], args: &[Value]) -> ResolveResult {
-    let target = args.first().ok_or_else(|| {
-        ExecutionError::function_error("indexOf", "expected argument")
-    })?;
+    let target = args
+        .first()
+        .ok_or_else(|| ExecutionError::function_error("indexOf", "expected argument"))?;
     for (i, item) in list.iter().enumerate() {
         if val_eq(item, target) {
             return Ok(Value::Int(i as i64));
@@ -108,9 +108,9 @@ pub(crate) fn list_index_of(list: &[Value], args: &[Value]) -> ResolveResult {
 ///
 /// Returns the index of the last occurrence of the value, or -1 if not found.
 pub(crate) fn list_last_index_of(list: &[Value], args: &[Value]) -> ResolveResult {
-    let target = args.first().ok_or_else(|| {
-        ExecutionError::function_error("lastIndexOf", "expected argument")
-    })?;
+    let target = args
+        .first()
+        .ok_or_else(|| ExecutionError::function_error("lastIndexOf", "expected argument"))?;
     let mut result: i64 = -1;
     for (i, item) in list.iter().enumerate() {
         if val_eq(item, target) {

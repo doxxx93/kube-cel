@@ -202,7 +202,9 @@ fn parse_quantity(s: &str) -> Result<KubeQuantity, String> {
         if (rest.starts_with('e') || rest.starts_with('E'))
             && !rest.starts_with("Ei")
             && rest.len() > 1
-            && rest[1..].chars().all(|c| c.is_ascii_digit() || c == '+' || c == '-')
+            && rest[1..]
+                .chars()
+                .all(|c| c.is_ascii_digit() || c == '+' || c == '-')
         {
             // Decimal exponent: treat whole string as number
             (s, "")
@@ -242,7 +244,7 @@ fn parse_quantity(s: &str) -> Result<KubeQuantity, String> {
 /// "1e3" → (1, 3): represents 1 * 10^3
 fn parse_number(s: &str) -> Result<(i128, i32), String> {
     // Handle scientific notation.
-    if let Some(e_pos) = s.find(|c: char| c == 'e' || c == 'E') {
+    if let Some(e_pos) = s.find(['e', 'E']) {
         let base_str = &s[..e_pos];
         let exp_str = &s[e_pos + 1..];
         let (base_mantissa, base_shift) = parse_decimal(base_str)?;
@@ -315,9 +317,9 @@ pub fn register(ctx: &mut Context<'_>) {
 
 fn extract_quantity(val: &Value) -> Result<&KubeQuantity, ExecutionError> {
     match val {
-        Value::Opaque(o) => o.downcast_ref::<KubeQuantity>().ok_or_else(|| {
-            ExecutionError::function_error("quantity", "expected Quantity type")
-        }),
+        Value::Opaque(o) => o
+            .downcast_ref::<KubeQuantity>()
+            .ok_or_else(|| ExecutionError::function_error("quantity", "expected Quantity type")),
         _ => Err(ExecutionError::function_error(
             "quantity",
             "expected Quantity type",
@@ -327,8 +329,7 @@ fn extract_quantity(val: &Value) -> Result<&KubeQuantity, ExecutionError> {
 
 /// `quantity(<string>) -> Quantity`
 fn cel_quantity(s: Arc<String>) -> ResolveResult {
-    let q = parse_quantity(&s)
-        .map_err(|e| ExecutionError::function_error("quantity", e))?;
+    let q = parse_quantity(&s).map_err(|e| ExecutionError::function_error("quantity", e))?;
     Ok(Value::Opaque(Arc::new(q)))
 }
 
@@ -413,9 +414,9 @@ pub(crate) fn cel_compare_to(This(this): This<Value>, other: Value) -> ResolveRe
 fn quantity_or_int(val: &Value, func: &str) -> Result<KubeQuantity, ExecutionError> {
     match val {
         Value::Opaque(o) => {
-            let q = o.downcast_ref::<KubeQuantity>().ok_or_else(|| {
-                ExecutionError::function_error(func, "expected Quantity or int")
-            })?;
+            let q = o
+                .downcast_ref::<KubeQuantity>()
+                .ok_or_else(|| ExecutionError::function_error(func, "expected Quantity or int"))?;
             Ok(q.clone())
         }
         Value::Int(n) => Ok(KubeQuantity::new(*n as i128, 0)),
@@ -449,22 +450,34 @@ mod tests {
 
     #[test]
     fn test_parse_decimal() {
-        assert_eq!(eval("quantity('1.5').asApproximateFloat()"), Value::Float(1.5));
+        assert_eq!(
+            eval("quantity('1.5').asApproximateFloat()"),
+            Value::Float(1.5)
+        );
     }
 
     #[test]
     fn test_parse_decimal_si() {
         assert_eq!(eval("quantity('1k').asInteger()"), Value::Int(1000));
         assert_eq!(eval("quantity('1M').asInteger()"), Value::Int(1_000_000));
-        assert_eq!(eval("quantity('500m').asApproximateFloat()"), Value::Float(0.5));
-        assert_eq!(eval("quantity('100n').asApproximateFloat()"), Value::Float(1e-7));
+        assert_eq!(
+            eval("quantity('500m').asApproximateFloat()"),
+            Value::Float(0.5)
+        );
+        assert_eq!(
+            eval("quantity('100n').asApproximateFloat()"),
+            Value::Float(1e-7)
+        );
     }
 
     #[test]
     fn test_parse_binary_si() {
         assert_eq!(eval("quantity('1Ki').asInteger()"), Value::Int(1024));
         assert_eq!(eval("quantity('1Mi').asInteger()"), Value::Int(1_048_576));
-        assert_eq!(eval("quantity('1Gi').asInteger()"), Value::Int(1_073_741_824));
+        assert_eq!(
+            eval("quantity('1Gi').asInteger()"),
+            Value::Int(1_073_741_824)
+        );
     }
 
     #[test]
@@ -485,7 +498,10 @@ mod tests {
     #[test]
     fn test_parse_negative() {
         assert_eq!(eval("quantity('-1').asInteger()"), Value::Int(-1));
-        assert_eq!(eval("quantity('-500m').asApproximateFloat()"), Value::Float(-0.5));
+        assert_eq!(
+            eval("quantity('-500m').asApproximateFloat()"),
+            Value::Float(-0.5)
+        );
     }
 
     #[test]
@@ -587,10 +603,7 @@ mod tests {
 
     #[test]
     fn test_sub_int() {
-        assert_eq!(
-            eval("quantity('1000').sub(1).asInteger()"),
-            Value::Int(999)
-        );
+        assert_eq!(eval("quantity('1000').sub(1).asInteger()"), Value::Int(999));
     }
 
     #[test]

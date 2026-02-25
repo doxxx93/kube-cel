@@ -90,9 +90,18 @@ mod tests {
 
     #[test]
     fn test_integration_strings() {
-        assert_eq!(eval("'hello'.charAt(1)"), Value::String(Arc::new("e".into())));
-        assert_eq!(eval("'HELLO'.lowerAscii()"), Value::String(Arc::new("hello".into())));
-        assert_eq!(eval("'  hello  '.trim()"), Value::String(Arc::new("hello".into())));
+        assert_eq!(
+            eval("'hello'.charAt(1)"),
+            Value::String(Arc::new("e".into()))
+        );
+        assert_eq!(
+            eval("'HELLO'.lowerAscii()"),
+            Value::String(Arc::new("hello".into()))
+        );
+        assert_eq!(
+            eval("'  hello  '.trim()"),
+            Value::String(Arc::new("hello".into()))
+        );
     }
 
     #[test]

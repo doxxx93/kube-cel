@@ -31,7 +31,12 @@ fn find(This(this): This<Arc<String>>, pattern: Arc<String>) -> ResolveResult {
 fn find_all(This(this): This<Arc<String>>, Arguments(args): Arguments) -> ResolveResult {
     let pattern = match args.first() {
         Some(Value::String(s)) => s.clone(),
-        _ => return Err(ExecutionError::function_error("findAll", "expected string pattern")),
+        _ => {
+            return Err(ExecutionError::function_error(
+                "findAll",
+                "expected string pattern",
+            ));
+        }
     };
 
     let re = Regex::new(&pattern)

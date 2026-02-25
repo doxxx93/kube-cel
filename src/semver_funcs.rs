@@ -33,7 +33,10 @@ pub fn register(ctx: &mut Context<'_>) {
 /// - Strip leading 'v' or 'V'
 /// - Pad missing minor/patch (e.g., "1" -> "1.0.0", "1.2" -> "1.2.0")
 fn normalize(s: &str) -> String {
-    let s = s.strip_prefix('v').or_else(|| s.strip_prefix('V')).unwrap_or(s);
+    let s = s
+        .strip_prefix('v')
+        .or_else(|| s.strip_prefix('V'))
+        .unwrap_or(s);
     let parts: Vec<&str> = s.splitn(2, '-').collect();
     let version_part = parts[0];
     let pre_part = parts.get(1);
@@ -69,10 +72,13 @@ fn is_semver(s: Arc<String>) -> ResolveResult {
 /// Helper to extract KubeSemver from an opaque Value.
 fn extract_semver(val: &Value) -> Result<&KubeSemver, ExecutionError> {
     match val {
-        Value::Opaque(o) => o.downcast_ref::<KubeSemver>().ok_or_else(|| {
-            ExecutionError::function_error("semver", "expected Semver type")
-        }),
-        _ => Err(ExecutionError::function_error("semver", "expected Semver type")),
+        Value::Opaque(o) => o
+            .downcast_ref::<KubeSemver>()
+            .ok_or_else(|| ExecutionError::function_error("semver", "expected Semver type")),
+        _ => Err(ExecutionError::function_error(
+            "semver",
+            "expected Semver type",
+        )),
     }
 }
 

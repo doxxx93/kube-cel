@@ -67,10 +67,10 @@ fn parse_ip_addr(s: &str) -> Result<IpAddr, String> {
     let addr = IpAddr::from_str(s).map_err(|e| format!("invalid IP address: {e}"))?;
 
     // Reject IPv4-mapped IPv6 (e.g., ::ffff:1.2.3.4)
-    if let IpAddr::V6(v6) = addr {
-        if let Some(_v4) = v6.to_ipv4_mapped() {
-            return Err("IPv4-mapped IPv6 addresses are not allowed".into());
-        }
+    if let IpAddr::V6(v6) = addr
+        && v6.to_ipv4_mapped().is_some()
+    {
+        return Err("IPv4-mapped IPv6 addresses are not allowed".into());
     }
 
     Ok(addr)
@@ -80,10 +80,10 @@ fn parse_cidr_net(s: &str) -> Result<IpNet, String> {
     let net = IpNet::from_str(s).map_err(|e| format!("invalid CIDR: {e}"))?;
 
     // Reject IPv4-mapped IPv6 in CIDR
-    if let IpAddr::V6(v6) = net.addr() {
-        if v6.to_ipv4_mapped().is_some() {
-            return Err("IPv4-mapped IPv6 in CIDR is not allowed".into());
-        }
+    if let IpAddr::V6(v6) = net.addr()
+        && v6.to_ipv4_mapped().is_some()
+    {
+        return Err("IPv4-mapped IPv6 in CIDR is not allowed".into());
     }
 
     Ok(net)
@@ -93,9 +93,9 @@ fn parse_cidr_net(s: &str) -> Result<IpNet, String> {
 
 fn extract_ip(val: &Value) -> Result<&KubeIP, cel::ExecutionError> {
     match val {
-        Value::Opaque(o) => o.downcast_ref::<KubeIP>().ok_or_else(|| {
-            cel::ExecutionError::function_error("ip", "expected IP type")
-        }),
+        Value::Opaque(o) => o
+            .downcast_ref::<KubeIP>()
+            .ok_or_else(|| cel::ExecutionError::function_error("ip", "expected IP type")),
         _ => Err(cel::ExecutionError::function_error(
             "ip",
             "expected IP type",
@@ -105,9 +105,9 @@ fn extract_ip(val: &Value) -> Result<&KubeIP, cel::ExecutionError> {
 
 fn extract_cidr(val: &Value) -> Result<&KubeCIDR, cel::ExecutionError> {
     match val {
-        Value::Opaque(o) => o.downcast_ref::<KubeCIDR>().ok_or_else(|| {
-            cel::ExecutionError::function_error("cidr", "expected CIDR type")
-        }),
+        Value::Opaque(o) => o
+            .downcast_ref::<KubeCIDR>()
+            .ok_or_else(|| cel::ExecutionError::function_error("cidr", "expected CIDR type")),
         _ => Err(cel::ExecutionError::function_error(
             "cidr",
             "expected CIDR type",
@@ -117,8 +117,7 @@ fn extract_cidr(val: &Value) -> Result<&KubeCIDR, cel::ExecutionError> {
 
 /// `ip(<string>) -> IP`
 fn parse_ip(s: Arc<String>) -> ResolveResult {
-    let addr = parse_ip_addr(&s)
-        .map_err(|e| cel::ExecutionError::function_error("ip", e))?;
+    let addr = parse_ip_addr(&s).map_err(|e| cel::ExecutionError::function_error("ip", e))?;
     Ok(Value::Opaque(Arc::new(KubeIP(addr))))
 }
 
@@ -194,8 +193,7 @@ fn ip_is_global_unicast(This(this): This<Value>) -> ResolveResult {
 
 /// `cidr(<string>) -> CIDR`
 fn parse_cidr(s: Arc<String>) -> ResolveResult {
-    let net = parse_cidr_net(&s)
-        .map_err(|e| cel::ExecutionError::function_error("cidr", e))?;
+    let net = parse_cidr_net(&s).map_err(|e| cel::ExecutionError::function_error("cidr", e))?;
     Ok(Value::Opaque(Arc::new(KubeCIDR(net))))
 }
 
@@ -208,8 +206,9 @@ fn is_cidr(s: Arc<String>) -> ResolveResult {
 fn cidr_contains_ip(This(this): This<Value>, arg: Value) -> ResolveResult {
     let cidr = extract_cidr(&this)?;
     let ip = match &arg {
-        Value::String(s) => parse_ip_addr(s)
-            .map_err(|e| cel::ExecutionError::function_error("containsIP", e))?,
+        Value::String(s) => {
+            parse_ip_addr(s).map_err(|e| cel::ExecutionError::function_error("containsIP", e))?
+        }
         Value::Opaque(o) => {
             let kip = o.downcast_ref::<KubeIP>().ok_or_else(|| {
                 cel::ExecutionError::function_error("containsIP", "expected IP or string")
@@ -220,7 +219,7 @@ fn cidr_contains_ip(This(this): This<Value>, arg: Value) -> ResolveResult {
             return Err(cel::ExecutionError::function_error(
                 "containsIP",
                 "expected IP or string argument",
-            ))
+            ));
         }
     };
     Ok(Value::Bool(cidr.0.contains(&ip)))
@@ -230,8 +229,9 @@ fn cidr_contains_ip(This(this): This<Value>, arg: Value) -> ResolveResult {
 fn cidr_contains_cidr(This(this): This<Value>, arg: Value) -> ResolveResult {
     let outer = extract_cidr(&this)?;
     let inner = match &arg {
-        Value::String(s) => parse_cidr_net(s)
-            .map_err(|e| cel::ExecutionError::function_error("containsCIDR", e))?,
+        Value::String(s) => {
+            parse_cidr_net(s).map_err(|e| cel::ExecutionError::function_error("containsCIDR", e))?
+        }
         Value::Opaque(o) => {
             let kc = o.downcast_ref::<KubeCIDR>().ok_or_else(|| {
                 cel::ExecutionError::function_error("containsCIDR", "expected CIDR or string")
@@ -242,7 +242,7 @@ fn cidr_contains_cidr(This(this): This<Value>, arg: Value) -> ResolveResult {
             return Err(cel::ExecutionError::function_error(
                 "containsCIDR",
                 "expected CIDR or string argument",
-            ))
+            ));
         }
     };
     // A contains B if A's network contains B's network address AND A's prefix <= B's prefix
@@ -310,7 +310,10 @@ mod tests {
     #[test]
     fn test_ip_global_unicast() {
         assert_eq!(eval("ip('8.8.8.8').isGlobalUnicast()"), Value::Bool(true));
-        assert_eq!(eval("ip('127.0.0.1').isGlobalUnicast()"), Value::Bool(false));
+        assert_eq!(
+            eval("ip('127.0.0.1').isGlobalUnicast()"),
+            Value::Bool(false)
+        );
     }
 
     #[test]
@@ -321,8 +324,14 @@ mod tests {
 
     #[test]
     fn test_cidr_contains_ip() {
-        assert_eq!(eval("cidr('192.168.0.0/24').containsIP('192.168.0.1')"), Value::Bool(true));
-        assert_eq!(eval("cidr('192.168.0.0/24').containsIP('10.0.0.1')"), Value::Bool(false));
+        assert_eq!(
+            eval("cidr('192.168.0.0/24').containsIP('192.168.0.1')"),
+            Value::Bool(true)
+        );
+        assert_eq!(
+            eval("cidr('192.168.0.0/24').containsIP('10.0.0.1')"),
+            Value::Bool(false)
+        );
     }
 
     #[test]
@@ -339,6 +348,9 @@ mod tests {
 
     #[test]
     fn test_cidr_prefix_length() {
-        assert_eq!(eval("cidr('192.168.0.0/24').prefixLength()"), Value::Int(24));
+        assert_eq!(
+            eval("cidr('192.168.0.0/24').prefixLength()"),
+            Value::Int(24)
+        );
     }
 }

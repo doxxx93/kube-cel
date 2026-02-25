@@ -29,7 +29,10 @@ fn char_at(This(this): This<Arc<String>>, idx: i64) -> ResolveResult {
     if idx < 0 || idx as usize >= chars.len() {
         return Err(ExecutionError::function_error(
             "charAt",
-            format!("index {idx} out of range for string of length {}", chars.len()),
+            format!(
+                "index {idx} out of range for string of length {}",
+                chars.len()
+            ),
         ));
     }
     Ok(Value::String(Arc::new(chars[idx as usize].to_string())))
@@ -37,10 +40,18 @@ fn char_at(This(this): This<Arc<String>>, idx: i64) -> ResolveResult {
 
 /// `<string>.indexOf(<string>) -> <int>`
 /// `<string>.indexOf(<string>, <int>) -> <int>`
-pub(crate) fn string_index_of(This(this): This<Arc<String>>, Arguments(args): Arguments) -> ResolveResult {
+pub(crate) fn string_index_of(
+    This(this): This<Arc<String>>,
+    Arguments(args): Arguments,
+) -> ResolveResult {
     let search = match args.first() {
         Some(Value::String(s)) => s.clone(),
-        _ => return Err(ExecutionError::function_error("indexOf", "expected string argument")),
+        _ => {
+            return Err(ExecutionError::function_error(
+                "indexOf",
+                "expected string argument",
+            ));
+        }
     };
     let offset: usize = match args.get(1) {
         Some(Value::Int(n)) => (*n).max(0) as usize,
@@ -55,7 +66,9 @@ pub(crate) fn string_index_of(This(this): This<Arc<String>>, Arguments(args): Ar
     }
 
     for i in offset..chars.len() {
-        if i + search_chars.len() <= chars.len() && chars[i..i + search_chars.len()] == search_chars[..] {
+        if i + search_chars.len() <= chars.len()
+            && chars[i..i + search_chars.len()] == search_chars[..]
+        {
             return Ok(Value::Int(i as i64));
         }
     }
@@ -64,10 +77,18 @@ pub(crate) fn string_index_of(This(this): This<Arc<String>>, Arguments(args): Ar
 
 /// `<string>.lastIndexOf(<string>) -> <int>`
 /// `<string>.lastIndexOf(<string>, <int>) -> <int>`
-pub(crate) fn string_last_index_of(This(this): This<Arc<String>>, Arguments(args): Arguments) -> ResolveResult {
+pub(crate) fn string_last_index_of(
+    This(this): This<Arc<String>>,
+    Arguments(args): Arguments,
+) -> ResolveResult {
     let search = match args.first() {
         Some(Value::String(s)) => s.clone(),
-        _ => return Err(ExecutionError::function_error("lastIndexOf", "expected string argument")),
+        _ => {
+            return Err(ExecutionError::function_error(
+                "lastIndexOf",
+                "expected string argument",
+            ));
+        }
     };
 
     let chars: Vec<char> = this.chars().collect();
@@ -106,11 +127,21 @@ fn upper_ascii(This(this): This<Arc<String>>) -> ResolveResult {
 fn string_replace(This(this): This<Arc<String>>, Arguments(args): Arguments) -> ResolveResult {
     let from = match args.first() {
         Some(Value::String(s)) => s.clone(),
-        _ => return Err(ExecutionError::function_error("replace", "expected string argument")),
+        _ => {
+            return Err(ExecutionError::function_error(
+                "replace",
+                "expected string argument",
+            ));
+        }
     };
     let to = match args.get(1) {
         Some(Value::String(s)) => s.clone(),
-        _ => return Err(ExecutionError::function_error("replace", "expected string argument")),
+        _ => {
+            return Err(ExecutionError::function_error(
+                "replace",
+                "expected string argument",
+            ));
+        }
     };
 
     let result = match args.get(2) {
@@ -125,7 +156,12 @@ fn string_replace(This(this): This<Arc<String>>, Arguments(args): Arguments) -> 
 fn string_split(This(this): This<Arc<String>>, Arguments(args): Arguments) -> ResolveResult {
     let separator = match args.first() {
         Some(Value::String(s)) => s.clone(),
-        _ => return Err(ExecutionError::function_error("split", "expected string argument")),
+        _ => {
+            return Err(ExecutionError::function_error(
+                "split",
+                "expected string argument",
+            ));
+        }
     };
 
     let parts: Vec<Value> = match args.get(1) {
@@ -146,7 +182,12 @@ fn string_split(This(this): This<Arc<String>>, Arguments(args): Arguments) -> Re
 fn substring(This(this): This<Arc<String>>, Arguments(args): Arguments) -> ResolveResult {
     let start = match args.first() {
         Some(Value::Int(n)) => *n,
-        _ => return Err(ExecutionError::function_error("substring", "expected int argument")),
+        _ => {
+            return Err(ExecutionError::function_error(
+                "substring",
+                "expected int argument",
+            ));
+        }
     };
 
     let chars: Vec<char> = this.chars().collect();
@@ -226,8 +267,14 @@ mod tests {
 
     #[test]
     fn test_char_at() {
-        assert_eq!(eval("'hello'.charAt(0)"), Value::String(Arc::new("h".into())));
-        assert_eq!(eval("'hello'.charAt(4)"), Value::String(Arc::new("o".into())));
+        assert_eq!(
+            eval("'hello'.charAt(0)"),
+            Value::String(Arc::new("h".into()))
+        );
+        assert_eq!(
+            eval("'hello'.charAt(4)"),
+            Value::String(Arc::new("o".into()))
+        );
     }
 
     #[test]
@@ -245,13 +292,22 @@ mod tests {
 
     #[test]
     fn test_lower_upper_ascii() {
-        assert_eq!(eval("'Hello World'.lowerAscii()"), Value::String(Arc::new("hello world".into())));
-        assert_eq!(eval("'Hello World'.upperAscii()"), Value::String(Arc::new("HELLO WORLD".into())));
+        assert_eq!(
+            eval("'Hello World'.lowerAscii()"),
+            Value::String(Arc::new("hello world".into()))
+        );
+        assert_eq!(
+            eval("'Hello World'.upperAscii()"),
+            Value::String(Arc::new("HELLO WORLD".into()))
+        );
     }
 
     #[test]
     fn test_trim() {
-        assert_eq!(eval("'  hello  '.trim()"), Value::String(Arc::new("hello".into())));
+        assert_eq!(
+            eval("'  hello  '.trim()"),
+            Value::String(Arc::new("hello".into()))
+        );
     }
 
     #[test]
@@ -284,7 +340,10 @@ mod tests {
 
     #[test]
     fn test_substring() {
-        assert_eq!(eval("'hello'.substring(1)"), Value::String(Arc::new("ello".into())));
+        assert_eq!(
+            eval("'hello'.substring(1)"),
+            Value::String(Arc::new("ello".into()))
+        );
     }
 
     #[test]

@@ -1,0 +1,52 @@
+name: ci
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+
+      - name: fmt
+        run: cargo +nightly fmt --check
+
+      - name: clippy
+        run: cargo clippy --all-features -- -D warnings
+
+      - name: test (all features)
+        run: cargo test --all-features
+
+      - name: test (no default features)
+        run: cargo test --no-default-features
+
+      - name: doc
+        run: cargo doc --no-deps --all-features
+
+  feature-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@nightly
+      - uses: Swatinem/rust-cache@v2
+
+      - name: check each feature independently
+        run: |
+          for feature in strings lists sets regex_funcs urls ip semver_funcs format quantity; do
+            echo "--- checking feature: $feature ---"
+            cargo check --no-default-features --features "$feature"
+          done

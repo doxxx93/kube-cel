@@ -66,13 +66,17 @@ fn last_index_of(This(this): This<Value>, Arguments(args): Arguments) -> Resolve
 // ---------------------------------------------------------------------------
 
 fn is_greater_than(This(this): This<Value>, Arguments(args): Arguments) -> ResolveResult {
-    let arg = args.first().cloned().ok_or_else(|| {
-        ExecutionError::function_error("isGreaterThan", "missing argument")
-    })?;
+    let arg = args
+        .first()
+        .cloned()
+        .ok_or_else(|| ExecutionError::function_error("isGreaterThan", "missing argument"))?;
 
     match &this {
         #[cfg(feature = "semver_funcs")]
-        Value::Opaque(o) if o.downcast_ref::<crate::semver_funcs::KubeSemver>().is_some() => {
+        Value::Opaque(o)
+            if o.downcast_ref::<crate::semver_funcs::KubeSemver>()
+                .is_some() =>
+        {
             crate::semver_funcs::semver_is_greater_than(This(this), arg)
         }
         #[cfg(feature = "quantity")]
@@ -87,13 +91,17 @@ fn is_greater_than(This(this): This<Value>, Arguments(args): Arguments) -> Resol
 }
 
 fn is_less_than(This(this): This<Value>, Arguments(args): Arguments) -> ResolveResult {
-    let arg = args.first().cloned().ok_or_else(|| {
-        ExecutionError::function_error("isLessThan", "missing argument")
-    })?;
+    let arg = args
+        .first()
+        .cloned()
+        .ok_or_else(|| ExecutionError::function_error("isLessThan", "missing argument"))?;
 
     match &this {
         #[cfg(feature = "semver_funcs")]
-        Value::Opaque(o) if o.downcast_ref::<crate::semver_funcs::KubeSemver>().is_some() => {
+        Value::Opaque(o)
+            if o.downcast_ref::<crate::semver_funcs::KubeSemver>()
+                .is_some() =>
+        {
             crate::semver_funcs::semver_is_less_than(This(this), arg)
         }
         #[cfg(feature = "quantity")]
@@ -108,13 +116,17 @@ fn is_less_than(This(this): This<Value>, Arguments(args): Arguments) -> ResolveR
 }
 
 fn compare_to(This(this): This<Value>, Arguments(args): Arguments) -> ResolveResult {
-    let arg = args.first().cloned().ok_or_else(|| {
-        ExecutionError::function_error("compareTo", "missing argument")
-    })?;
+    let arg = args
+        .first()
+        .cloned()
+        .ok_or_else(|| ExecutionError::function_error("compareTo", "missing argument"))?;
 
     match &this {
         #[cfg(feature = "semver_funcs")]
-        Value::Opaque(o) if o.downcast_ref::<crate::semver_funcs::KubeSemver>().is_some() => {
+        Value::Opaque(o)
+            if o.downcast_ref::<crate::semver_funcs::KubeSemver>()
+                .is_some() =>
+        {
             crate::semver_funcs::semver_compare_to(This(this), arg)
         }
         #[cfg(feature = "quantity")]

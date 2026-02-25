@@ -88,8 +88,14 @@ mod tests {
 
     #[test]
     fn test_equivalent() {
-        assert_eq!(eval("sets.equivalent([1, 2, 3], [3, 2, 1])"), Value::Bool(true));
-        assert_eq!(eval("sets.equivalent([1, 2, 2], [1, 2])"), Value::Bool(true));
+        assert_eq!(
+            eval("sets.equivalent([1, 2, 3], [3, 2, 1])"),
+            Value::Bool(true)
+        );
+        assert_eq!(
+            eval("sets.equivalent([1, 2, 2], [1, 2])"),
+            Value::Bool(true)
+        );
         assert_eq!(eval("sets.equivalent([1, 2], [1, 3])"), Value::Bool(false));
     }
 
