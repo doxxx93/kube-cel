@@ -634,10 +634,7 @@ mod tests {
         let mut ctx = Context::default();
         register(&mut ctx);
         crate::dispatch::register(&mut ctx);
-        Program::compile(expr)
-            .unwrap()
-            .execute(&ctx)
-            .unwrap_err()
+        Program::compile(expr).unwrap().execute(&ctx).unwrap_err()
     }
 
     #[test]
@@ -677,7 +674,10 @@ mod tests {
             eval("quantity('1u').asApproximateFloat()"),
             Value::Float(1e-6)
         );
-        assert_eq!(eval("quantity('1T').asInteger()"), Value::Int(1_000_000_000_000));
+        assert_eq!(
+            eval("quantity('1T').asInteger()"),
+            Value::Int(1_000_000_000_000)
+        );
         assert_eq!(
             eval("quantity('1P').asInteger()"),
             Value::Int(1_000_000_000_000_000)
@@ -691,14 +691,8 @@ mod tests {
     #[test]
     fn test_parse_remaining_binary_si() {
         // Ti, Pi, Ei
-        assert_eq!(
-            eval("quantity('1Ti').asInteger()"),
-            Value::Int(1 << 40)
-        );
-        assert_eq!(
-            eval("quantity('1Pi').asInteger()"),
-            Value::Int(1 << 50)
-        );
+        assert_eq!(eval("quantity('1Ti').asInteger()"), Value::Int(1 << 40));
+        assert_eq!(eval("quantity('1Pi').asInteger()"), Value::Int(1 << 50));
     }
 
     #[test]

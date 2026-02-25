@@ -303,10 +303,7 @@ mod tests {
         let mut ctx = Context::default();
         register(&mut ctx);
         crate::dispatch::register(&mut ctx);
-        Program::compile(expr)
-            .unwrap()
-            .execute(&ctx)
-            .unwrap_err()
+        Program::compile(expr).unwrap().execute(&ctx).unwrap_err()
     }
 
     #[test]
@@ -347,10 +344,7 @@ mod tests {
 
     #[test]
     fn test_slice_empty_range() {
-        assert_eq!(
-            eval("[1, 2, 3].slice(2, 2)"),
-            Value::List(Arc::new(vec![]))
-        );
+        assert_eq!(eval("[1, 2, 3].slice(2, 2)"), Value::List(Arc::new(vec![])));
     }
 
     #[test]

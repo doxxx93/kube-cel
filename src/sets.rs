@@ -124,10 +124,7 @@ mod tests {
             eval("sets.contains(['a', 'b', 'c'], ['a', 'c'])"),
             Value::Bool(true)
         );
-        assert_eq!(
-            eval("sets.contains(['a', 'b'], ['d'])"),
-            Value::Bool(false)
-        );
+        assert_eq!(eval("sets.contains(['a', 'b'], ['d'])"), Value::Bool(false));
     }
 
     #[test]

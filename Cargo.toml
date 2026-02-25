@@ -4,6 +4,8 @@ version = "0.1.0"
 edition = "2024"
 license = "Apache-2.0"
 description = "Kubernetes CEL extension functions for cel-interpreter"
+repository = "https://github.com/doxxx93/kube-cel"
+documentation = "https://docs.rs/kube-cel"
 keywords = ["kubernetes", "cel", "kube", "validation"]
 categories = ["api-bindings"]
 

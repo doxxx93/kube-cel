@@ -176,10 +176,7 @@ mod tests {
         crate::semver_funcs::register(&mut ctx);
         #[cfg(feature = "quantity")]
         crate::quantity::register(&mut ctx);
-        Program::compile(expr)
-            .unwrap()
-            .execute(&ctx)
-            .unwrap_err()
+        Program::compile(expr).unwrap().execute(&ctx).unwrap_err()
     }
 
     #[test]

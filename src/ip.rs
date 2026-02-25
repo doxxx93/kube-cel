@@ -359,10 +359,7 @@ mod tests {
     fn eval_err(expr: &str) -> cel::ExecutionError {
         let mut ctx = Context::default();
         register(&mut ctx);
-        Program::compile(expr)
-            .unwrap()
-            .execute(&ctx)
-            .unwrap_err()
+        Program::compile(expr).unwrap().execute(&ctx).unwrap_err()
     }
 
     #[test]
@@ -436,10 +433,7 @@ mod tests {
             Value::Bool(false)
         );
         // IPv6 link-local should not be global
-        assert_eq!(
-            eval("ip('fe80::1').isGlobalUnicast()"),
-            Value::Bool(false)
-        );
+        assert_eq!(eval("ip('fe80::1').isGlobalUnicast()"), Value::Bool(false));
     }
 
     #[test]

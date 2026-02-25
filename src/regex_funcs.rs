@@ -101,10 +101,7 @@ mod tests {
     fn eval_err(expr: &str) -> cel::ExecutionError {
         let mut ctx = Context::default();
         register(&mut ctx);
-        Program::compile(expr)
-            .unwrap()
-            .execute(&ctx)
-            .unwrap_err()
+        Program::compile(expr).unwrap().execute(&ctx).unwrap_err()
     }
 
     #[test]
