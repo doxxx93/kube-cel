@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.2.1] - 2026-02-25
+
+### Fixed
+
+- Gate validation examples with `required-features` (fixes `--no-default-features` build)
+
+### Added
+
+- Examples: `basic`, `validate_crd`, `compiled_schema`
+- CHANGELOG.md
+- Crate-level doc for `validation` feature
+
 ## [0.2.0] - 2026-02-25
 
 ### Added
