@@ -33,3 +33,11 @@ semver_funcs = ["dep:semver"]
 format = []
 quantity = []
 validation = ["dep:serde_json", "dep:serde"]
+
+[[example]]
+name = "validate_crd"
+required-features = ["validation"]
+
+[[example]]
+name = "compiled_schema"
+required-features = ["validation"]
