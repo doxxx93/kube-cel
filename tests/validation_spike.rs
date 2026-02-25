@@ -19,11 +19,7 @@ fn eval_self(json_val: serde_json::Value, expr: &str) -> Value {
 }
 
 /// Helper: same as `eval_self` but also binds `oldSelf`.
-fn eval_transition(
-    json_self: serde_json::Value,
-    json_old: serde_json::Value,
-    expr: &str,
-) -> Value {
+fn eval_transition(json_self: serde_json::Value, json_old: serde_json::Value, expr: &str) -> Value {
     let mut ctx = Context::default();
     kube_cel::register_all(&mut ctx);
     ctx.add_variable_from_value("self", json_to_cel(&json_self));

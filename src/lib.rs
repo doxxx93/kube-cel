@@ -43,6 +43,9 @@ pub mod quantity;
 #[cfg(feature = "validation")]
 pub mod values;
 
+#[cfg(feature = "validation")]
+pub mod compilation;
+
 mod dispatch;
 
 /// Register all available Kubernetes CEL extension functions into the given context.

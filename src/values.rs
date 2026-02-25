@@ -8,8 +8,8 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use cel::objects::{Key, Map};
 use cel::Value;
+use cel::objects::{Key, Map};
 
 /// Convert a [`serde_json::Value`] into a [`cel::Value`].
 ///
@@ -34,9 +34,7 @@ pub fn json_to_cel(value: &serde_json::Value) -> Value {
             for (k, v) in obj {
                 map.insert(Key::String(Arc::new(k.clone())), json_to_cel(v));
             }
-            Value::Map(Map {
-                map: Arc::new(map),
-            })
+            Value::Map(Map { map: Arc::new(map) })
         }
     }
 }
@@ -77,9 +75,7 @@ mod tests {
     #[test]
     fn test_u64_beyond_i64() {
         let big: u64 = (i64::MAX as u64) + 1;
-        let v = json_to_cel(&serde_json::Value::Number(
-            serde_json::Number::from(big),
-        ));
+        let v = json_to_cel(&serde_json::Value::Number(serde_json::Number::from(big)));
         assert_eq!(v, Value::UInt(big));
     }
 
@@ -158,7 +154,10 @@ mod tests {
             }
         }));
         if let Value::Map(outer) = v {
-            let spec = outer.map.get(&Key::String(Arc::new("spec".into()))).unwrap();
+            let spec = outer
+                .map
+                .get(&Key::String(Arc::new("spec".into())))
+                .unwrap();
             if let Value::Map(inner) = spec {
                 assert_eq!(
                     inner.map.get(&Key::String(Arc::new("replicas".into()))),
