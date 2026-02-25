@@ -4,7 +4,9 @@
 //! compiles `x-kubernetes-validations` rules, evaluates them against object data,
 //! and collects [`ValidationError`]s.
 
-use crate::compilation::{CompilationError, CompilationResult, compile_schema_validations};
+use crate::compilation::{
+    CompilationError, CompilationResult, CompiledSchema, compile_schema_validations,
+};
 use crate::values::json_to_cel;
 use cel::Context;
 
@@ -38,7 +40,8 @@ impl std::error::Error for ValidationError {}
 /// Walks the OpenAPI schema tree, compiles `x-kubernetes-validations` rules at
 /// each node, and evaluates them against the corresponding object values.
 ///
-/// Currently stateless — Phase 5 may add compilation caching.
+/// For repeated validation against the same schema, use [`compile_schema`] +
+/// [`validate_compiled`](Validator::validate_compiled) to avoid re-compilation.
 pub struct Validator {
     _private: (),
 }
@@ -51,9 +54,8 @@ impl Validator {
 
     /// Validate an object against a CRD schema's CEL validation rules.
     ///
-    /// Recursively walks the schema tree, evaluating `x-kubernetes-validations`
-    /// at each node. Transition rules (referencing `oldSelf`) are only evaluated
-    /// when `old_object` is provided.
+    /// Compiles rules on each call. For repeated validation against the same
+    /// schema, prefer [`compile_schema`] + [`validate_compiled`](Self::validate_compiled).
     pub fn validate(
         &self,
         schema: &serde_json::Value,
@@ -65,6 +67,23 @@ impl Validator {
         errors
     }
 
+    /// Validate an object using a pre-compiled schema tree.
+    ///
+    /// Use [`compile_schema`] to build the [`CompiledSchema`], then call this
+    /// method for each object to validate — rules are compiled only once.
+    pub fn validate_compiled(
+        &self,
+        compiled: &CompiledSchema,
+        object: &serde_json::Value,
+        old_object: Option<&serde_json::Value>,
+    ) -> Vec<ValidationError> {
+        let mut errors = Vec::new();
+        self.walk_compiled(compiled, object, old_object, String::new(), &mut errors);
+        errors
+    }
+
+    // ── Schema-based walking (compiles on each call) ────────────────
+
     fn walk_schema(
         &self,
         schema: &serde_json::Value,
@@ -73,10 +92,8 @@ impl Validator {
         path: String,
         errors: &mut Vec<ValidationError>,
     ) {
-        // Evaluate validations at this node
         self.evaluate_validations(schema, value, old_value, &path, errors);
 
-        // Recurse into properties (only if value is an object)
         if let (Some(properties), Some(obj)) = (
             schema.get("properties").and_then(|p| p.as_object()),
             value.as_object(),
@@ -84,30 +101,20 @@ impl Validator {
             for (prop_name, prop_schema) in properties {
                 if let Some(child_value) = obj.get(prop_name) {
                     let child_old = old_value.and_then(|o| o.get(prop_name));
-                    let child_path = if path.is_empty() {
-                        prop_name.clone()
-                    } else {
-                        format!("{path}.{prop_name}")
-                    };
+                    let child_path = join_path(&path, prop_name);
                     self.walk_schema(prop_schema, child_value, child_old, child_path, errors);
                 }
             }
         }
 
-        // Recurse into array items (only if value is an array)
         if let (Some(items_schema), Some(arr)) = (schema.get("items"), value.as_array()) {
             for (i, item) in arr.iter().enumerate() {
                 let old_item = old_value.and_then(|o| o.as_array()).and_then(|a| a.get(i));
-                let item_path = if path.is_empty() {
-                    format!("[{i}]")
-                } else {
-                    format!("{path}[{i}]")
-                };
+                let item_path = join_path_index(&path, i);
                 self.walk_schema(items_schema, item, old_item, item_path, errors);
             }
         }
 
-        // Recurse into additionalProperties (only for keys not in properties)
         if let (Some(additional_schema), Some(obj)) = (
             schema.get("additionalProperties").filter(|a| a.is_object()),
             value.as_object(),
@@ -123,11 +130,7 @@ impl Validator {
                     continue;
                 }
                 let old_val = old_value.and_then(|o| o.get(key));
-                let child_path = if path.is_empty() {
-                    key.clone()
-                } else {
-                    format!("{path}.{key}")
-                };
+                let child_path = join_path(&path, key);
                 self.walk_schema(additional_schema, val, old_val, child_path, errors);
             }
         }
@@ -142,11 +145,67 @@ impl Validator {
         errors: &mut Vec<ValidationError>,
     ) {
         let compiled = compile_schema_validations(schema);
+        self.evaluate_compiled_results(&compiled, value, old_value, path, errors);
+    }
 
-        for result in compiled {
+    // ── CompiledSchema-based walking ────────────────────────────────
+
+    fn walk_compiled(
+        &self,
+        compiled: &CompiledSchema,
+        value: &serde_json::Value,
+        old_value: Option<&serde_json::Value>,
+        path: String,
+        errors: &mut Vec<ValidationError>,
+    ) {
+        self.evaluate_compiled_results(&compiled.validations, value, old_value, &path, errors);
+
+        if let Some(obj) = value.as_object() {
+            for (prop_name, child_compiled) in &compiled.properties {
+                if let Some(child_value) = obj.get(prop_name) {
+                    let child_old = old_value.and_then(|o| o.get(prop_name));
+                    let child_path = join_path(&path, prop_name);
+                    self.walk_compiled(child_compiled, child_value, child_old, child_path, errors);
+                }
+            }
+        }
+
+        if let (Some(items_compiled), Some(arr)) = (&compiled.items, value.as_array()) {
+            for (i, item) in arr.iter().enumerate() {
+                let old_item = old_value.and_then(|o| o.as_array()).and_then(|a| a.get(i));
+                let item_path = join_path_index(&path, i);
+                self.walk_compiled(items_compiled, item, old_item, item_path, errors);
+            }
+        }
+
+        if let (Some(additional_compiled), Some(obj)) =
+            (&compiled.additional_properties, value.as_object())
+        {
+            for (key, val) in obj {
+                if compiled.properties.contains_key(key) {
+                    continue;
+                }
+                let old_val = old_value.and_then(|o| o.get(key));
+                let child_path = join_path(&path, key);
+                self.walk_compiled(additional_compiled, val, old_val, child_path, errors);
+            }
+        }
+    }
+
+    // ── Shared evaluation logic ─────────────────────────────────────
+
+    fn evaluate_compiled_results(
+        &self,
+        results: &[Result<CompilationResult, CompilationError>],
+        value: &serde_json::Value,
+        old_value: Option<&serde_json::Value>,
+        path: &str,
+        errors: &mut Vec<ValidationError>,
+    ) {
+        for result in results {
             match result {
                 Ok(cr) => {
-                    self.evaluate_rule(&cr, value, old_value, path, errors);
+                    self.evaluate_rule(cr, value, old_value, path, errors);
                 }
                 Err(CompilationError::Parse { rule, source }) => {
                     errors.push(ValidationError {
@@ -176,9 +235,9 @@ impl Validator {
         path: &str,
         errors: &mut Vec<ValidationError>,
     ) {
-        // Skip transition rules when no old value is available
-        if cr.is_transition_rule && old_value.is_none() {
-            return;
+        // Handle transition rules
+        if cr.is_transition_rule && old_value.is_none() && cr.rule.optional_old_self != Some(true) {
+            return; // skip transition rule without old value
         }
 
         let mut ctx = Context::default();
@@ -187,6 +246,8 @@ impl Validator {
 
         if let Some(old) = old_value {
             ctx.add_variable_from_value("oldSelf", json_to_cel(old));
+        } else if cr.rule.optional_old_self == Some(true) {
+            ctx.add_variable_from_value("oldSelf", cel::Value::Null);
         }
 
         match cr.program.execute(&ctx) {
@@ -194,11 +255,7 @@ impl Validator {
                 // Validation passed
             }
             Ok(cel::Value::Bool(false)) => {
-                let message = cr
-                    .rule
-                    .message
-                    .clone()
-                    .unwrap_or_else(|| format!("failed rule: {}", cr.rule.rule));
+                let message = self.resolve_message(cr, &ctx);
                 errors.push(ValidationError {
                     rule: cr.rule.rule.clone(),
                     message,
@@ -224,6 +281,20 @@ impl Validator {
             }
         }
     }
+
+    /// Resolve the error message: try messageExpression first, fall back to
+    /// static message, then default.
+    fn resolve_message(&self, cr: &CompilationResult, ctx: &Context<'_>) -> String {
+        if let Some(ref msg_prog) = cr.message_program
+            && let Ok(cel::Value::String(s)) = msg_prog.execute(ctx)
+        {
+            return (*s).clone();
+        }
+        cr.rule
+            .message
+            .clone()
+            .unwrap_or_else(|| format!("failed rule: {}", cr.rule.rule))
+    }
 }
 
 impl Default for Validator {
@@ -243,9 +314,39 @@ pub fn validate(
     Validator::new().validate(schema, object, old_object)
 }
 
+/// Convenience function to validate using a pre-compiled schema.
+///
+/// See [`Validator::validate_compiled`] for details.
+pub fn validate_compiled(
+    compiled: &CompiledSchema,
+    object: &serde_json::Value,
+    old_object: Option<&serde_json::Value>,
+) -> Vec<ValidationError> {
+    Validator::new().validate_compiled(compiled, object, old_object)
+}
+
+// ── Path helpers ────────────────────────────────────────────────────
+
+fn join_path(base: &str, segment: &str) -> String {
+    if base.is_empty() {
+        segment.to_string()
+    } else {
+        format!("{base}.{segment}")
+    }
+}
+
+fn join_path_index(base: &str, index: usize) -> String {
+    if base.is_empty() {
+        format!("[{index}]")
+    } else {
+        format!("{base}[{index}]")
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::compilation::compile_schema;
     use serde_json::json;
 
     fn make_schema(validations: serde_json::Value) -> serde_json::Value {
@@ -308,7 +409,6 @@ mod tests {
             {"rule": "self.replicas >= oldSelf.replicas", "message": "cannot scale down"}
         ]));
         let obj = json!({"replicas": 1, "name": "app"});
-        // No old_object → transition rule is skipped
         let errors = validate(&schema, &obj, None);
         assert!(errors.is_empty());
     }
@@ -406,7 +506,6 @@ mod tests {
                 }
             }
         });
-        // optional_field is not present in the object
         let obj = json!({});
         let errors = validate(&schema, &obj, None);
         assert!(errors.is_empty());
@@ -492,5 +591,131 @@ mod tests {
         let errors = validate(&schema, &obj, None);
         assert_eq!(errors.len(), 1);
         assert_eq!(errors[0].field_path, "b");
+    }
+
+    // ── Phase 5 tests ───────────────────────────────────────────────
+
+    #[test]
+    fn message_expression_produces_dynamic_message() {
+        let schema = make_schema(json!([{
+            "rule": "self.replicas >= 0",
+            "message": "static fallback",
+            "messageExpression": "'replicas is ' + string(self.replicas) + ', must be >= 0'"
+        }]));
+        let obj = json!({"replicas": -5, "name": "app"});
+        let errors = validate(&schema, &obj, None);
+        assert_eq!(errors.len(), 1);
+        assert_eq!(errors[0].message, "replicas is -5, must be >= 0");
+    }
+
+    #[test]
+    fn message_expression_falls_back_to_static() {
+        let schema = make_schema(json!([{
+            "rule": "self.replicas >= 0",
+            "message": "static message",
+            "messageExpression": "invalid >="
+        }]));
+        let obj = json!({"replicas": -1, "name": "app"});
+        let errors = validate(&schema, &obj, None);
+        assert_eq!(errors.len(), 1);
+        // messageExpression failed to compile → falls back to static message
+        assert_eq!(errors[0].message, "static message");
+    }
+
+    #[test]
+    fn optional_old_self_evaluated_on_create() {
+        let schema = make_schema(json!([{
+            "rule": "oldSelf == null || self.replicas >= oldSelf.replicas",
+            "message": "cannot scale down",
+            "optionalOldSelf": true
+        }]));
+        // Create (no old object): rule is evaluated with oldSelf = null
+        let obj = json!({"replicas": 1, "name": "app"});
+        let errors = validate(&schema, &obj, None);
+        assert!(errors.is_empty()); // oldSelf == null → true
+    }
+
+    #[test]
+    fn optional_old_self_with_old_object() {
+        let schema = make_schema(json!([{
+            "rule": "oldSelf == null || self.replicas >= oldSelf.replicas",
+            "message": "cannot scale down",
+            "optionalOldSelf": true
+        }]));
+        let obj = json!({"replicas": 1, "name": "app"});
+        let old = json!({"replicas": 3, "name": "app"});
+        let errors = validate(&schema, &obj, Some(&old));
+        assert_eq!(errors.len(), 1);
+        assert_eq!(errors[0].message, "cannot scale down");
+    }
+
+    #[test]
+    fn optional_old_self_false_still_skips() {
+        let schema = make_schema(json!([{
+            "rule": "self.replicas >= oldSelf.replicas",
+            "message": "cannot scale down",
+            "optionalOldSelf": false
+        }]));
+        let obj = json!({"replicas": 1, "name": "app"});
+        // optionalOldSelf: false → transition rule skipped on create
+        let errors = validate(&schema, &obj, None);
+        assert!(errors.is_empty());
+    }
+
+    #[test]
+    fn validate_compiled_matches_validate() {
+        let schema = json!({
+            "type": "object",
+            "properties": {
+                "spec": {
+                    "type": "object",
+                    "x-kubernetes-validations": [
+                        {"rule": "self.replicas >= 0", "message": "non-negative"}
+                    ],
+                    "properties": {
+                        "replicas": {"type": "integer"}
+                    }
+                }
+            }
+        });
+        let obj = json!({"spec": {"replicas": -1}});
+
+        let errors_schema = validate(&schema, &obj, None);
+        let compiled = compile_schema(&schema);
+        let errors_compiled = validate_compiled(&compiled, &obj, None);
+
+        assert_eq!(errors_schema.len(), errors_compiled.len());
+        assert_eq!(errors_schema[0].message, errors_compiled[0].message);
+        assert_eq!(errors_schema[0].field_path, errors_compiled[0].field_path);
+    }
+
+    #[test]
+    fn validate_compiled_reuse() {
+        let schema = json!({
+            "type": "object",
+            "x-kubernetes-validations": [
+                {"rule": "self.x > 0", "message": "x must be positive"}
+            ],
+            "properties": {"x": {"type": "integer"}}
+        });
+        let compiled = compile_schema(&schema);
+
+        // Validate multiple objects with the same compiled schema
+        assert_eq!(
+            validate_compiled(&compiled, &json!({"x": 1}), None).len(),
+            0
+        );
+        assert_eq!(
+            validate_compiled(&compiled, &json!({"x": -1}), None).len(),
+            1
+        );
+        assert_eq!(
+            validate_compiled(&compiled, &json!({"x": 5}), None).len(),
+            0
+        );
+        assert_eq!(
+            validate_compiled(&compiled, &json!({"x": 0}), None).len(),
+            1
+        );
     }
 }

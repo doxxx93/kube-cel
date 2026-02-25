@@ -660,6 +660,245 @@ fn realistic_cert_manager_like_crd() {
     assert_eq!(errors.len(), 2);
 }
 
+// ── Phase 5: message_expression, optional_old_self, CompiledSchema ──
+
+#[test]
+fn message_expression_end_to_end() {
+    let schema = json!({
+        "type": "object",
+        "properties": {
+            "spec": {
+                "type": "object",
+                "properties": {
+                    "replicas": {"type": "integer"}
+                },
+                "x-kubernetes-validations": [{
+                    "rule": "self.replicas >= 0",
+                    "message": "static fallback",
+                    "messageExpression": "'replicas is ' + string(self.replicas) + ', must be >= 0'"
+                }]
+            }
+        }
+    });
+
+    let obj = json!({"spec": {"replicas": -3}});
+    let errors = validate(&schema, &obj, None);
+    assert_eq!(errors.len(), 1);
+    assert_eq!(errors[0].message, "replicas is -3, must be >= 0");
+    assert_eq!(errors[0].field_path, "spec");
+}
+
+#[test]
+fn message_expression_fallback_to_static_end_to_end() {
+    let schema = json!({
+        "type": "object",
+        "x-kubernetes-validations": [{
+            "rule": "self.x > 0",
+            "message": "x must be positive",
+            "messageExpression": "invalid CEL >="
+        }],
+        "properties": {
+            "x": {"type": "integer"}
+        }
+    });
+
+    let obj = json!({"x": -1});
+    let errors = validate(&schema, &obj, None);
+    assert_eq!(errors.len(), 1);
+    // Invalid messageExpression → falls back to static message
+    assert_eq!(errors[0].message, "x must be positive");
+}
+
+#[test]
+fn optional_old_self_create_end_to_end() {
+    let schema = json!({
+        "type": "object",
+        "properties": {
+            "spec": {
+                "type": "object",
+                "properties": {
+                    "replicas": {"type": "integer"}
+                },
+                "x-kubernetes-validations": [{
+                    "rule": "oldSelf == null || self.replicas >= oldSelf.replicas",
+                    "message": "cannot scale down",
+                    "optionalOldSelf": true
+                }]
+            }
+        }
+    });
+
+    // Create (no old_object): oldSelf is null, rule passes
+    let obj = json!({"spec": {"replicas": 1}});
+    assert!(validate(&schema, &obj, None).is_empty());
+
+    // Update (scale down): fails
+    let old = json!({"spec": {"replicas": 5}});
+    let errors = validate(&schema, &obj, Some(&old));
+    assert_eq!(errors.len(), 1);
+    assert_eq!(errors[0].message, "cannot scale down");
+    assert_eq!(errors[0].field_path, "spec");
+
+    // Update (scale up): passes
+    let obj2 = json!({"spec": {"replicas": 10}});
+    assert!(validate(&schema, &obj2, Some(&old)).is_empty());
+}
+
+#[test]
+fn compiled_schema_end_to_end() {
+    use kube_cel::compilation::compile_schema;
+    use kube_cel::validation::validate_compiled;
+
+    let schema = json!({
+        "type": "object",
+        "properties": {
+            "spec": {
+                "type": "object",
+                "x-kubernetes-validations": [
+                    {"rule": "self.replicas >= 1", "message": "at least one replica"}
+                ],
+                "properties": {
+                    "replicas": {
+                        "type": "integer",
+                        "x-kubernetes-validations": [
+                            {"rule": "self >= 0", "message": "non-negative"}
+                        ]
+                    }
+                }
+            }
+        }
+    });
+
+    let compiled = compile_schema(&schema);
+
+    // Validate multiple objects without recompiling
+    let pass = json!({"spec": {"replicas": 3}});
+    assert!(validate_compiled(&compiled, &pass, None).is_empty());
+
+    let fail = json!({"spec": {"replicas": -1}});
+    let errors = validate_compiled(&compiled, &fail, None);
+    assert_eq!(errors.len(), 2); // at least one replica + non-negative
+    assert!(errors.iter().any(|e| e.field_path == "spec"));
+    assert!(errors.iter().any(|e| e.field_path == "spec.replicas"));
+}
+
+#[test]
+fn compiled_schema_with_message_expression() {
+    use kube_cel::compilation::compile_schema;
+    use kube_cel::validation::validate_compiled;
+
+    let schema = json!({
+        "type": "object",
+        "x-kubernetes-validations": [{
+            "rule": "self.count > 0",
+            "messageExpression": "'count is ' + string(self.count) + ' but must be > 0'"
+        }],
+        "properties": {
+            "count": {"type": "integer"}
+        }
+    });
+
+    let compiled = compile_schema(&schema);
+    let errors = validate_compiled(&compiled, &json!({"count": -5}), None);
+    assert_eq!(errors.len(), 1);
+    assert_eq!(errors[0].message, "count is -5 but must be > 0");
+}
+
+#[test]
+fn compiled_schema_with_transition_rule() {
+    use kube_cel::compilation::compile_schema;
+    use kube_cel::validation::validate_compiled;
+
+    let schema = json!({
+        "type": "object",
+        "x-kubernetes-validations": [
+            {"rule": "self.x >= oldSelf.x", "message": "x cannot decrease"}
+        ],
+        "properties": {
+            "x": {"type": "integer"}
+        }
+    });
+
+    let compiled = compile_schema(&schema);
+
+    // Create: transition rule skipped
+    assert!(validate_compiled(&compiled, &json!({"x": 1}), None).is_empty());
+
+    // Update (decrease): fails
+    let errors = validate_compiled(&compiled, &json!({"x": 1}), Some(&json!({"x": 5})));
+    assert_eq!(errors.len(), 1);
+    assert_eq!(errors[0].message, "x cannot decrease");
+}
+
+#[test]
+fn compiled_schema_matches_schema_validation() {
+    use kube_cel::compilation::compile_schema;
+    use kube_cel::validation::validate_compiled;
+
+    // Complex schema with nested properties, arrays, and multiple rules
+    let schema = json!({
+        "type": "object",
+        "properties": {
+            "spec": {
+                "type": "object",
+                "x-kubernetes-validations": [
+                    {"rule": "self.replicas >= self.minReplicas", "message": "replicas >= min"}
+                ],
+                "properties": {
+                    "replicas": {
+                        "type": "integer",
+                        "x-kubernetes-validations": [
+                            {"rule": "self >= 0", "message": "non-negative"}
+                        ]
+                    },
+                    "minReplicas": {"type": "integer"},
+                    "containers": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "name": {"type": "string"}
+                            },
+                            "x-kubernetes-validations": [
+                                {"rule": "self.name.size() > 0", "message": "name required"}
+                            ]
+                        }
+                    }
+                }
+            }
+        }
+    });
+
+    let obj = json!({
+        "spec": {
+            "replicas": -1,
+            "minReplicas": 2,
+            "containers": [
+                {"name": "ok"},
+                {"name": ""}
+            ]
+        }
+    });
+
+    let mut errors_schema = validate(&schema, &obj, None);
+    let compiled = compile_schema(&schema);
+    let mut errors_compiled = validate_compiled(&compiled, &obj, None);
+
+    // Both should produce the same number of errors
+    assert_eq!(errors_schema.len(), errors_compiled.len());
+
+    // Sort by field_path for deterministic comparison (HashMap iteration order may differ)
+    errors_schema.sort_by(|a, b| a.field_path.cmp(&b.field_path));
+    errors_compiled.sort_by(|a, b| a.field_path.cmp(&b.field_path));
+
+    // Same field paths and messages
+    for (a, b) in errors_schema.iter().zip(errors_compiled.iter()) {
+        assert_eq!(a.field_path, b.field_path);
+        assert_eq!(a.message, b.message);
+        assert_eq!(a.rule, b.rule);
+    }
+}
+
 // ── kube-rs compatibility ───────────────────────────────────────────
 
 #[test]

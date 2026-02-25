@@ -3,6 +3,8 @@
 //! This module parses validation rules from CRD schemas and compiles them into
 //! [`cel::Program`] instances that can be evaluated against resource data.
 
+use std::collections::HashMap;
+
 use cel::{ParseErrors, Program};
 
 /// A single CRD `x-kubernetes-validations` rule.
@@ -23,7 +25,8 @@ pub struct Rule {
     /// JSONPath to the field that caused the failure.
     #[serde(default)]
     pub field_path: Option<String>,
-    /// Whether `oldSelf` is optional (Phase 5).
+    /// Whether `oldSelf` is optional. When `true`, transition rules are
+    /// evaluated even on create (with `oldSelf` bound to null).
     #[serde(default)]
     pub optional_old_self: Option<bool>,
 }
@@ -37,6 +40,9 @@ pub struct CompilationResult {
     pub rule: Rule,
     /// Whether the rule references `oldSelf` (transition rule).
     pub is_transition_rule: bool,
+    /// Pre-compiled `messageExpression` program (if present and valid).
+    /// `None` if no `messageExpression` was specified or if it failed to compile.
+    pub message_program: Option<Program>,
 }
 
 /// Errors that can occur during rule compilation.
@@ -79,10 +85,18 @@ pub fn compile_rule(rule: &Rule) -> Result<CompilationResult, CompilationError> 
         source: e,
     })?;
     let is_transition_rule = program.references().has_variable("oldSelf");
+
+    // Best-effort: compile messageExpression if present, ignore failures
+    let message_program = rule
+        .message_expression
+        .as_deref()
+        .and_then(|expr| Program::compile(expr).ok());
+
     Ok(CompilationResult {
         program,
         rule: rule.clone(),
         is_transition_rule,
+        message_program,
     })
 }
 
@@ -107,6 +121,49 @@ pub fn compile_schema_validations(
             compile_rule(&rule)
         })
         .collect()
+}
+
+/// A pre-compiled schema tree. Compile once with [`compile_schema`], then
+/// validate many objects via [`Validator::validate_compiled`](crate::validation::Validator::validate_compiled).
+#[derive(Debug)]
+pub struct CompiledSchema {
+    /// Compiled validation rules at this schema node.
+    pub validations: Vec<Result<CompilationResult, CompilationError>>,
+    /// Compiled child property schemas.
+    pub properties: HashMap<String, CompiledSchema>,
+    /// Compiled array items schema.
+    pub items: Option<Box<CompiledSchema>>,
+    /// Compiled additionalProperties schema.
+    pub additional_properties: Option<Box<CompiledSchema>>,
+}
+
+/// Recursively compile all `x-kubernetes-validations` rules in a schema tree.
+///
+/// Returns a [`CompiledSchema`] that can be reused across multiple validation
+/// calls, avoiding repeated compilation.
+pub fn compile_schema(schema: &serde_json::Value) -> CompiledSchema {
+    let validations = compile_schema_validations(schema);
+
+    let mut properties = HashMap::new();
+    if let Some(props) = schema.get("properties").and_then(|p| p.as_object()) {
+        for (name, prop_schema) in props {
+            properties.insert(name.clone(), compile_schema(prop_schema));
+        }
+    }
+
+    let items = schema.get("items").map(|s| Box::new(compile_schema(s)));
+
+    let additional_properties = schema
+        .get("additionalProperties")
+        .filter(|a| a.is_object())
+        .map(|s| Box::new(compile_schema(s)));
+
+    CompiledSchema {
+        validations,
+        properties,
+        items,
+        additional_properties,
+    }
 }
 
 #[cfg(test)]
@@ -236,6 +293,96 @@ mod tests {
         });
         let results = compile_schema_validations(&schema);
         assert!(results.is_empty());
+    }
+
+    #[test]
+    fn message_expression_compiled() {
+        let rule = Rule {
+            rule: "self.x > 0".into(),
+            message: Some("x must be positive".into()),
+            message_expression: Some("'x is ' + string(self.x)".into()),
+            reason: None,
+            field_path: None,
+            optional_old_self: None,
+        };
+        let result = compile_rule(&rule).unwrap();
+        assert!(result.message_program.is_some());
+    }
+
+    #[test]
+    fn message_expression_invalid_ignored() {
+        let rule = Rule {
+            rule: "self.x > 0".into(),
+            message: Some("fallback".into()),
+            message_expression: Some("invalid >=".into()),
+            reason: None,
+            field_path: None,
+            optional_old_self: None,
+        };
+        let result = compile_rule(&rule).unwrap();
+        // Invalid messageExpression is silently ignored
+        assert!(result.message_program.is_none());
+    }
+
+    #[test]
+    fn message_expression_none() {
+        let rule = Rule {
+            rule: "self.x > 0".into(),
+            message: None,
+            message_expression: None,
+            reason: None,
+            field_path: None,
+            optional_old_self: None,
+        };
+        let result = compile_rule(&rule).unwrap();
+        assert!(result.message_program.is_none());
+    }
+
+    #[test]
+    fn compile_schema_tree() {
+        let schema = json!({
+            "type": "object",
+            "x-kubernetes-validations": [{"rule": "has(self.spec)"}],
+            "properties": {
+                "spec": {
+                    "type": "object",
+                    "x-kubernetes-validations": [{"rule": "self.replicas >= 0"}],
+                    "properties": {
+                        "replicas": {"type": "integer"}
+                    }
+                }
+            }
+        });
+        let compiled = compile_schema(&schema);
+        assert_eq!(compiled.validations.len(), 1);
+        assert!(compiled.properties.contains_key("spec"));
+        let spec = &compiled.properties["spec"];
+        assert_eq!(spec.validations.len(), 1);
+        assert!(spec.properties.contains_key("replicas"));
+    }
+
+    #[test]
+    fn compile_schema_with_items() {
+        let schema = json!({
+            "type": "array",
+            "items": {
+                "type": "object",
+                "x-kubernetes-validations": [{"rule": "self.name.size() > 0"}]
+            }
+        });
+        let compiled = compile_schema(&schema);
+        assert!(compiled.items.is_some());
+        assert_eq!(compiled.items.as_ref().unwrap().validations.len(), 1);
+    }
+
+    #[test]
+    fn compile_schema_empty() {
+        let schema = json!({"type": "object"});
+        let compiled = compile_schema(&schema);
+        assert!(compiled.validations.is_empty());
+        assert!(compiled.properties.is_empty());
+        assert!(compiled.items.is_none());
+        assert!(compiled.additional_properties.is_none());
     }
 
     #[test]
