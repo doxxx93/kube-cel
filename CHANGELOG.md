@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.3.0] - 2026-02-26
+
+### Added
+
+- **Schema-aware `format: date-time` / `format: duration` support**
+  - `values::SchemaFormat` enum — `DateTime`, `Duration`, `None`
+  - `values::json_to_cel_with_schema()` — raw JSON schema 기반 재귀 변환
+  - `values::json_to_cel_with_compiled()` — `CompiledSchema` 메타데이터 기반 변환
+  - `values::parse_go_duration()` — Go 스타일 duration 파싱 (`"1h30m"`, `"-5s"` 등)
+  - `compilation::CompiledSchema.format` 필드 추가
+  - `validation` 모듈에서 자동으로 스키마 인식 변환 적용
+  - 파싱 실패 시 `Value::String`으로 graceful fallback
+- Example: `timestamp_duration`
+- `chrono` dependency (validation feature에 포함)
+
 ## [0.2.1] - 2026-02-25
 
 ### Fixed
