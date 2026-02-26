@@ -87,7 +87,39 @@ fn convert_number(n: &serde_json::Number) -> Value {
 /// the value falls back to `Value::String`.
 pub fn json_to_cel_with_schema(value: &serde_json::Value, schema: &serde_json::Value) -> Value {
     let format = SchemaFormat::from_schema(schema);
-    json_to_cel_inner(value, &format, Some(schema), Option::<&CompiledSchema>::None)
+    match value {
+        serde_json::Value::Null => Value::Null,
+        serde_json::Value::Bool(b) => Value::Bool(*b),
+        serde_json::Value::Number(n) => convert_number(n),
+        serde_json::Value::String(s) => convert_string_with_format(s, &format),
+        serde_json::Value::Array(arr) => {
+            let items: Vec<Value> = arr
+                .iter()
+                .map(|item| match schema.get("items") {
+                    Some(items_schema) => json_to_cel_with_schema(item, items_schema),
+                    None => json_to_cel(item),
+                })
+                .collect();
+            Value::List(Arc::new(items))
+        }
+        serde_json::Value::Object(obj) => {
+            let props = schema.get("properties").and_then(|p| p.as_object());
+            let additional = schema.get("additionalProperties").filter(|a| a.is_object());
+
+            let mut map = HashMap::with_capacity(obj.len());
+            for (k, v) in obj {
+                let child_val = if let Some(prop_schema) = props.and_then(|p| p.get(k)) {
+                    json_to_cel_with_schema(v, prop_schema)
+                } else if let Some(additional_schema) = additional {
+                    json_to_cel_with_schema(v, additional_schema)
+                } else {
+                    json_to_cel(v)
+                };
+                map.insert(Key::String(Arc::new(k.clone())), child_val);
+            }
+            Value::Map(Map { map: Arc::new(map) })
+        }
+    }
 }
 
 /// Convert a JSON value to a CEL value using a pre-compiled [`CompiledSchema`].
@@ -95,58 +127,17 @@ pub fn json_to_cel_with_schema(value: &serde_json::Value, schema: &serde_json::V
 /// Behaves like [`json_to_cel_with_schema`] but uses the format metadata stored
 /// in the compiled schema tree instead of parsing the raw JSON schema.
 pub fn json_to_cel_with_compiled(value: &serde_json::Value, compiled: &CompiledSchema) -> Value {
-    json_to_cel_inner(
-        value,
-        &compiled.format,
-        Option::<&serde_json::Value>::None,
-        Some(compiled),
-    )
-}
-
-/// Unified inner conversion that can work from either a raw schema or a compiled
-/// schema. Exactly one of `raw_schema` or `compiled` should be `Some`.
-fn json_to_cel_inner<S, C>(
-    value: &serde_json::Value,
-    format: &SchemaFormat,
-    raw_schema: Option<S>,
-    compiled: Option<C>,
-) -> Value
-where
-    S: std::ops::Deref<Target = serde_json::Value>,
-    C: std::ops::Deref<Target = CompiledSchema>,
-{
     match value {
         serde_json::Value::Null => Value::Null,
         serde_json::Value::Bool(b) => Value::Bool(*b),
         serde_json::Value::Number(n) => convert_number(n),
-        serde_json::Value::String(s) => convert_string_with_format(s, format),
+        serde_json::Value::String(s) => convert_string_with_format(s, &compiled.format),
         serde_json::Value::Array(arr) => {
-            // Determine child schema/compiled for items
             let items: Vec<Value> = arr
                 .iter()
-                .map(|item| {
-                    if let Some(ref rs) = raw_schema
-                        && let Some(items_schema) = rs.get("items")
-                    {
-                        let child_fmt = SchemaFormat::from_schema(items_schema);
-                        return json_to_cel_inner(
-                            item,
-                            &child_fmt,
-                            Some(items_schema),
-                            Option::<&CompiledSchema>::None,
-                        );
-                    }
-                    if let Some(ref cs) = compiled
-                        && let Some(ref items_compiled) = cs.items
-                    {
-                        return json_to_cel_inner(
-                            item,
-                            &items_compiled.format,
-                            Option::<&serde_json::Value>::None,
-                            Some(items_compiled.as_ref()),
-                        );
-                    }
-                    json_to_cel(item)
+                .map(|item| match &compiled.items {
+                    Some(items_compiled) => json_to_cel_with_compiled(item, items_compiled),
+                    None => json_to_cel(item),
                 })
                 .collect();
             Value::List(Arc::new(items))
@@ -154,50 +145,10 @@ where
         serde_json::Value::Object(obj) => {
             let mut map = HashMap::with_capacity(obj.len());
             for (k, v) in obj {
-                let child_val = if let Some(ref rs) = raw_schema {
-                    if let Some(prop_schema) = rs
-                        .get("properties")
-                        .and_then(|p| p.get(k))
-                    {
-                        let child_fmt = SchemaFormat::from_schema(prop_schema);
-                        json_to_cel_inner(
-                            v,
-                            &child_fmt,
-                            Some(prop_schema),
-                            Option::<&CompiledSchema>::None,
-                        )
-                    } else if let Some(additional) = rs
-                        .get("additionalProperties")
-                        .filter(|a| a.is_object())
-                    {
-                        let child_fmt = SchemaFormat::from_schema(additional);
-                        json_to_cel_inner(
-                            v,
-                            &child_fmt,
-                            Some(additional),
-                            Option::<&CompiledSchema>::None,
-                        )
-                    } else {
-                        json_to_cel(v)
-                    }
-                } else if let Some(ref cs) = compiled {
-                    if let Some(prop_compiled) = cs.properties.get(k) {
-                        json_to_cel_inner(
-                            v,
-                            &prop_compiled.format,
-                            Option::<&serde_json::Value>::None,
-                            Some(prop_compiled),
-                        )
-                    } else if let Some(ref additional) = cs.additional_properties {
-                        json_to_cel_inner(
-                            v,
-                            &additional.format,
-                            Option::<&serde_json::Value>::None,
-                            Some(additional.as_ref()),
-                        )
-                    } else {
-                        json_to_cel(v)
-                    }
+                let child_val = if let Some(prop_compiled) = compiled.properties.get(k) {
+                    json_to_cel_with_compiled(v, prop_compiled)
+                } else if let Some(ref additional) = compiled.additional_properties {
+                    json_to_cel_with_compiled(v, additional)
                 } else {
                     json_to_cel(v)
                 };
@@ -442,10 +393,7 @@ mod tests {
 
     #[test]
     fn parse_duration_hours() {
-        assert_eq!(
-            parse_go_duration("1h"),
-            Some(chrono::Duration::hours(1))
-        );
+        assert_eq!(parse_go_duration("1h"), Some(chrono::Duration::hours(1)));
     }
 
     #[test]
@@ -506,10 +454,7 @@ mod tests {
 
     #[test]
     fn parse_duration_negative() {
-        assert_eq!(
-            parse_go_duration("-1h"),
-            Some(chrono::Duration::hours(-1))
-        );
+        assert_eq!(parse_go_duration("-1h"), Some(chrono::Duration::hours(-1)));
         assert_eq!(
             parse_go_duration("-30s"),
             Some(chrono::Duration::seconds(-30))
