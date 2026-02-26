@@ -11,7 +11,7 @@ Implements the Kubernetes-specific CEL libraries defined in [`k8s.io/apiserver/p
 
 ```toml
 [dependencies]
-kube-cel = "0.2"
+kube-cel = "0.3"
 cel = "0.12"
 ```
 
@@ -43,7 +43,7 @@ With the `validation` feature, you can compile and evaluate `x-kubernetes-valida
 
 ```toml
 [dependencies]
-kube-cel = { version = "0.2", features = ["validation"] }
+kube-cel = { version = "0.3", features = ["validation"] }
 ```
 
 ```rust
@@ -81,6 +81,26 @@ assert_eq!(errors[1].field_path, "spec.replicas");
 ```
 
 The validator walks the schema tree, compiles rules at each node, and evaluates them with `self` bound to the corresponding object value. Transition rules (referencing `oldSelf`) are supported by passing `old_object`.
+
+### Schema-aware `format` support
+
+Fields with `format: "date-time"` or `format: "duration"` in the schema are automatically converted to CEL `Timestamp` / `Duration` values, matching K8s API server behavior:
+
+```rust
+let schema = json!({
+    "type": "object",
+    "properties": {
+        "expiresAt": { "type": "string", "format": "date-time" },
+        "timeout":   { "type": "string", "format": "duration" }
+    },
+    "x-kubernetes-validations": [
+        {"rule": "self.expiresAt > timestamp('2024-01-01T00:00:00Z')", "message": "expired"},
+        {"rule": "self.timeout <= duration('1h')", "message": "too long"}
+    ]
+});
+```
+
+Invalid strings gracefully fall back to `Value::String`.
 
 ## Supported Functions
 
@@ -126,7 +146,7 @@ All features are enabled by default. Disable with `default-features = false` and
 | `semver_funcs` | `semver` | Semantic versioning |
 | `format` | - | String formatting |
 | `quantity` | - | Kubernetes resource quantities |
-| `validation` | `serde_json`, `serde` | CRD validation pipeline (compile + evaluate `x-kubernetes-validations`) |
+| `validation` | `serde_json`, `serde`, `chrono` | CRD validation pipeline (compile + evaluate `x-kubernetes-validations`, `format: date-time/duration`) |
 
 ## Related
 
