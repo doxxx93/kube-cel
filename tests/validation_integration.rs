@@ -985,3 +985,257 @@ fn kube_core_reason_values() {
         Some("FieldValueDuplicate")
     );
 }
+
+// ── format: date-time / duration support ────────────────────────────
+
+#[test]
+fn timestamp_comparison_passes() {
+    let schema = json!({
+        "type": "object",
+        "properties": {
+            "expiresAt": {
+                "type": "string",
+                "format": "date-time"
+            }
+        },
+        "x-kubernetes-validations": [{
+            "rule": "self.expiresAt > timestamp('2024-01-01T00:00:00Z')",
+            "message": "must expire after 2024"
+        }]
+    });
+
+    let obj = json!({"expiresAt": "2025-06-15T12:00:00Z"});
+    let errors = validate(&schema, &obj, None);
+    assert!(errors.is_empty());
+}
+
+#[test]
+fn timestamp_comparison_fails() {
+    let schema = json!({
+        "type": "object",
+        "properties": {
+            "expiresAt": {
+                "type": "string",
+                "format": "date-time"
+            }
+        },
+        "x-kubernetes-validations": [{
+            "rule": "self.expiresAt > timestamp('2024-01-01T00:00:00Z')",
+            "message": "must expire after 2024"
+        }]
+    });
+
+    let obj = json!({"expiresAt": "2023-06-15T12:00:00Z"});
+    let errors = validate(&schema, &obj, None);
+    assert_eq!(errors.len(), 1);
+    assert_eq!(errors[0].message, "must expire after 2024");
+}
+
+#[test]
+fn duration_comparison_passes() {
+    let schema = json!({
+        "type": "object",
+        "properties": {
+            "timeout": {
+                "type": "string",
+                "format": "duration"
+            }
+        },
+        "x-kubernetes-validations": [{
+            "rule": "self.timeout <= duration('1h')",
+            "message": "timeout must be at most 1 hour"
+        }]
+    });
+
+    let obj = json!({"timeout": "30m"});
+    let errors = validate(&schema, &obj, None);
+    assert!(errors.is_empty());
+}
+
+#[test]
+fn duration_comparison_fails() {
+    let schema = json!({
+        "type": "object",
+        "properties": {
+            "timeout": {
+                "type": "string",
+                "format": "duration"
+            }
+        },
+        "x-kubernetes-validations": [{
+            "rule": "self.timeout <= duration('1h')",
+            "message": "timeout must be at most 1 hour"
+        }]
+    });
+
+    let obj = json!({"timeout": "2h"});
+    let errors = validate(&schema, &obj, None);
+    assert_eq!(errors.len(), 1);
+    assert_eq!(errors[0].message, "timeout must be at most 1 hour");
+}
+
+#[test]
+fn invalid_datetime_string_falls_back_to_string() {
+    let schema = json!({
+        "type": "object",
+        "properties": {
+            "expiresAt": {
+                "type": "string",
+                "format": "date-time"
+            }
+        },
+        "x-kubernetes-validations": [{
+            "rule": "self.expiresAt == 'not-a-date'",
+            "message": "should match as string"
+        }]
+    });
+
+    let obj = json!({"expiresAt": "not-a-date"});
+    let errors = validate(&schema, &obj, None);
+    // The invalid date-time string falls back to Value::String,
+    // so string comparison works
+    assert!(errors.is_empty());
+}
+
+#[test]
+fn timestamp_transition_rule() {
+    let schema = json!({
+        "type": "object",
+        "properties": {
+            "expiresAt": {
+                "type": "string",
+                "format": "date-time"
+            }
+        },
+        "x-kubernetes-validations": [{
+            "rule": "self.expiresAt >= oldSelf.expiresAt",
+            "message": "expiration cannot be moved earlier"
+        }]
+    });
+
+    // Move expiration later: OK
+    let obj = json!({"expiresAt": "2025-06-15T00:00:00Z"});
+    let old = json!({"expiresAt": "2025-01-01T00:00:00Z"});
+    assert!(validate(&schema, &obj, Some(&old)).is_empty());
+
+    // Move expiration earlier: FAIL
+    let obj2 = json!({"expiresAt": "2024-06-15T00:00:00Z"});
+    let errors = validate(&schema, &obj2, Some(&old));
+    assert_eq!(errors.len(), 1);
+    assert_eq!(errors[0].message, "expiration cannot be moved earlier");
+}
+
+#[test]
+fn compiled_schema_timestamp_comparison() {
+    use kube_cel::compilation::compile_schema;
+    use kube_cel::validation::validate_compiled;
+
+    let schema = json!({
+        "type": "object",
+        "properties": {
+            "expiresAt": {
+                "type": "string",
+                "format": "date-time"
+            }
+        },
+        "x-kubernetes-validations": [{
+            "rule": "self.expiresAt > timestamp('2024-01-01T00:00:00Z')",
+            "message": "must expire after 2024"
+        }]
+    });
+
+    let compiled = compile_schema(&schema);
+
+    // Pass
+    let obj = json!({"expiresAt": "2025-06-15T12:00:00Z"});
+    assert!(validate_compiled(&compiled, &obj, None).is_empty());
+
+    // Fail
+    let obj2 = json!({"expiresAt": "2023-06-15T12:00:00Z"});
+    let errors = validate_compiled(&compiled, &obj2, None);
+    assert_eq!(errors.len(), 1);
+    assert_eq!(errors[0].message, "must expire after 2024");
+}
+
+#[test]
+fn compiled_schema_duration_comparison() {
+    use kube_cel::compilation::compile_schema;
+    use kube_cel::validation::validate_compiled;
+
+    let schema = json!({
+        "type": "object",
+        "properties": {
+            "timeout": {
+                "type": "string",
+                "format": "duration"
+            }
+        },
+        "x-kubernetes-validations": [{
+            "rule": "self.timeout <= duration('1h')",
+            "message": "timeout must be at most 1 hour"
+        }]
+    });
+
+    let compiled = compile_schema(&schema);
+
+    assert!(validate_compiled(&compiled, &json!({"timeout": "30m"}), None).is_empty());
+
+    let errors = validate_compiled(&compiled, &json!({"timeout": "2h"}), None);
+    assert_eq!(errors.len(), 1);
+}
+
+#[test]
+fn nested_object_timestamp_access() {
+    let schema = json!({
+        "type": "object",
+        "properties": {
+            "spec": {
+                "type": "object",
+                "properties": {
+                    "certificate": {
+                        "type": "object",
+                        "properties": {
+                            "notAfter": {
+                                "type": "string",
+                                "format": "date-time"
+                            },
+                            "notBefore": {
+                                "type": "string",
+                                "format": "date-time"
+                            }
+                        },
+                        "x-kubernetes-validations": [{
+                            "rule": "self.notAfter > self.notBefore",
+                            "message": "notAfter must be after notBefore"
+                        }]
+                    }
+                }
+            }
+        }
+    });
+
+    // Valid: notAfter > notBefore
+    let obj = json!({
+        "spec": {
+            "certificate": {
+                "notBefore": "2024-01-01T00:00:00Z",
+                "notAfter": "2025-01-01T00:00:00Z"
+            }
+        }
+    });
+    assert!(validate(&schema, &obj, None).is_empty());
+
+    // Invalid: notAfter < notBefore
+    let obj2 = json!({
+        "spec": {
+            "certificate": {
+                "notBefore": "2025-01-01T00:00:00Z",
+                "notAfter": "2024-01-01T00:00:00Z"
+            }
+        }
+    });
+    let errors = validate(&schema, &obj2, None);
+    assert_eq!(errors.len(), 1);
+    assert_eq!(errors[0].field_path, "spec.certificate");
+    assert_eq!(errors[0].message, "notAfter must be after notBefore");
+}

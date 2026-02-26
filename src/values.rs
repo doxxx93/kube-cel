@@ -4,12 +4,41 @@
 //! into the CEL value representation used by the `cel` crate. The converted
 //! values can then be bound as variables (e.g. `self`, `oldSelf`) in a CEL
 //! evaluation context.
+//!
+//! For schema-aware conversion that respects `format: "date-time"` and
+//! `format: "duration"`, use [`json_to_cel_with_schema`] or
+//! [`json_to_cel_with_compiled`].
 
 use std::collections::HashMap;
 use std::sync::Arc;
 
 use cel::Value;
 use cel::objects::{Key, Map};
+
+use crate::compilation::CompiledSchema;
+
+/// The `format` hint from an OpenAPI schema property.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub enum SchemaFormat {
+    /// `format: "date-time"` — strings should be parsed as CEL `Timestamp`.
+    DateTime,
+    /// `format: "duration"` — strings should be parsed as CEL `Duration`.
+    Duration,
+    /// No recognized format or not a string type.
+    #[default]
+    None,
+}
+
+impl SchemaFormat {
+    /// Extract a `SchemaFormat` from a raw JSON schema node.
+    pub fn from_schema(schema: &serde_json::Value) -> Self {
+        match schema.get("format").and_then(|f| f.as_str()) {
+            Some("date-time") => SchemaFormat::DateTime,
+            Some("duration") => SchemaFormat::Duration,
+            _ => SchemaFormat::None,
+        }
+    }
+}
 
 /// Convert a [`serde_json::Value`] into a [`cel::Value`].
 ///
@@ -47,6 +76,222 @@ fn convert_number(n: &serde_json::Number) -> Value {
     } else {
         Value::Float(n.as_f64().unwrap())
     }
+}
+
+/// Convert a JSON value to a CEL value, using the raw JSON schema to recognize
+/// `format: "date-time"` and `format: "duration"` string fields.
+///
+/// This recursively walks both the value and the schema in parallel. For string
+/// values whose schema specifies a recognized format, the string is parsed into
+/// the corresponding CEL type (`Timestamp` or `Duration`). On parse failure,
+/// the value falls back to `Value::String`.
+pub fn json_to_cel_with_schema(value: &serde_json::Value, schema: &serde_json::Value) -> Value {
+    let format = SchemaFormat::from_schema(schema);
+    json_to_cel_inner(value, &format, Some(schema), Option::<&CompiledSchema>::None)
+}
+
+/// Convert a JSON value to a CEL value using a pre-compiled [`CompiledSchema`].
+///
+/// Behaves like [`json_to_cel_with_schema`] but uses the format metadata stored
+/// in the compiled schema tree instead of parsing the raw JSON schema.
+pub fn json_to_cel_with_compiled(value: &serde_json::Value, compiled: &CompiledSchema) -> Value {
+    json_to_cel_inner(
+        value,
+        &compiled.format,
+        Option::<&serde_json::Value>::None,
+        Some(compiled),
+    )
+}
+
+/// Unified inner conversion that can work from either a raw schema or a compiled
+/// schema. Exactly one of `raw_schema` or `compiled` should be `Some`.
+fn json_to_cel_inner<S, C>(
+    value: &serde_json::Value,
+    format: &SchemaFormat,
+    raw_schema: Option<S>,
+    compiled: Option<C>,
+) -> Value
+where
+    S: std::ops::Deref<Target = serde_json::Value>,
+    C: std::ops::Deref<Target = CompiledSchema>,
+{
+    match value {
+        serde_json::Value::Null => Value::Null,
+        serde_json::Value::Bool(b) => Value::Bool(*b),
+        serde_json::Value::Number(n) => convert_number(n),
+        serde_json::Value::String(s) => convert_string_with_format(s, format),
+        serde_json::Value::Array(arr) => {
+            // Determine child schema/compiled for items
+            let items: Vec<Value> = arr
+                .iter()
+                .map(|item| {
+                    if let Some(ref rs) = raw_schema
+                        && let Some(items_schema) = rs.get("items")
+                    {
+                        let child_fmt = SchemaFormat::from_schema(items_schema);
+                        return json_to_cel_inner(
+                            item,
+                            &child_fmt,
+                            Some(items_schema),
+                            Option::<&CompiledSchema>::None,
+                        );
+                    }
+                    if let Some(ref cs) = compiled
+                        && let Some(ref items_compiled) = cs.items
+                    {
+                        return json_to_cel_inner(
+                            item,
+                            &items_compiled.format,
+                            Option::<&serde_json::Value>::None,
+                            Some(items_compiled.as_ref()),
+                        );
+                    }
+                    json_to_cel(item)
+                })
+                .collect();
+            Value::List(Arc::new(items))
+        }
+        serde_json::Value::Object(obj) => {
+            let mut map = HashMap::with_capacity(obj.len());
+            for (k, v) in obj {
+                let child_val = if let Some(ref rs) = raw_schema {
+                    if let Some(prop_schema) = rs
+                        .get("properties")
+                        .and_then(|p| p.get(k))
+                    {
+                        let child_fmt = SchemaFormat::from_schema(prop_schema);
+                        json_to_cel_inner(
+                            v,
+                            &child_fmt,
+                            Some(prop_schema),
+                            Option::<&CompiledSchema>::None,
+                        )
+                    } else if let Some(additional) = rs
+                        .get("additionalProperties")
+                        .filter(|a| a.is_object())
+                    {
+                        let child_fmt = SchemaFormat::from_schema(additional);
+                        json_to_cel_inner(
+                            v,
+                            &child_fmt,
+                            Some(additional),
+                            Option::<&CompiledSchema>::None,
+                        )
+                    } else {
+                        json_to_cel(v)
+                    }
+                } else if let Some(ref cs) = compiled {
+                    if let Some(prop_compiled) = cs.properties.get(k) {
+                        json_to_cel_inner(
+                            v,
+                            &prop_compiled.format,
+                            Option::<&serde_json::Value>::None,
+                            Some(prop_compiled),
+                        )
+                    } else if let Some(ref additional) = cs.additional_properties {
+                        json_to_cel_inner(
+                            v,
+                            &additional.format,
+                            Option::<&serde_json::Value>::None,
+                            Some(additional.as_ref()),
+                        )
+                    } else {
+                        json_to_cel(v)
+                    }
+                } else {
+                    json_to_cel(v)
+                };
+                map.insert(Key::String(Arc::new(k.clone())), child_val);
+            }
+            Value::Map(Map { map: Arc::new(map) })
+        }
+    }
+}
+
+/// Convert a string using the schema format hint.
+fn convert_string_with_format(s: &str, format: &SchemaFormat) -> Value {
+    match format {
+        SchemaFormat::DateTime => {
+            if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(s) {
+                return Value::Timestamp(dt);
+            }
+            Value::String(Arc::new(s.to_string()))
+        }
+        SchemaFormat::Duration => {
+            if let Some(d) = parse_go_duration(s) {
+                return Value::Duration(d);
+            }
+            Value::String(Arc::new(s.to_string()))
+        }
+        SchemaFormat::None => Value::String(Arc::new(s.to_string())),
+    }
+}
+
+/// Parse a Go-style duration string into a [`chrono::Duration`].
+///
+/// Supported units: `h` (hours), `m` (minutes), `s` (seconds), `ms` (milliseconds),
+/// `us` (microseconds), `ns` (nanoseconds). Multiple units can be combined
+/// (e.g., `"1h30m"`). An optional leading `-` makes the duration negative.
+/// The bare string `"0"` is treated as zero duration.
+///
+/// Returns `None` if the string cannot be parsed.
+pub fn parse_go_duration(input: &str) -> Option<chrono::Duration> {
+    let (input, negative) = if let Some(rest) = input.strip_prefix('-') {
+        (rest, true)
+    } else {
+        (input, false)
+    };
+
+    if input == "0" {
+        return Some(chrono::Duration::zero());
+    }
+
+    let mut remaining = input;
+    let mut total_nanos: i64 = 0;
+    let mut parsed_any = false;
+
+    while !remaining.is_empty() {
+        // Parse the numeric part (integer or float)
+        let num_end = remaining
+            .find(|c: char| !c.is_ascii_digit() && c != '.')
+            .unwrap_or(0);
+        if num_end == 0 {
+            return None; // no digits found
+        }
+        let num_str = &remaining[..num_end];
+        let num: f64 = num_str.parse().ok()?;
+        remaining = &remaining[num_end..];
+
+        // Parse the unit suffix
+        let (unit_nanos, unit_len) = if remaining.starts_with("ms") {
+            (1_000_000i64, 2)
+        } else if remaining.starts_with("us") {
+            (1_000i64, 2)
+        } else if remaining.starts_with("ns") {
+            (1i64, 2)
+        } else if remaining.starts_with('h') {
+            (3_600_000_000_000i64, 1)
+        } else if remaining.starts_with('m') {
+            (60_000_000_000i64, 1)
+        } else if remaining.starts_with('s') {
+            (1_000_000_000i64, 1)
+        } else {
+            return None; // unknown unit
+        };
+
+        remaining = &remaining[unit_len..];
+        total_nanos += (num * unit_nanos as f64).trunc() as i64;
+        parsed_any = true;
+    }
+
+    if !parsed_any {
+        return None;
+    }
+
+    if negative {
+        total_nanos = -total_nanos;
+    }
+    Some(chrono::Duration::nanoseconds(total_nanos))
 }
 
 #[cfg(test)]
@@ -191,5 +436,227 @@ mod tests {
         );
         // float → Float
         assert_eq!(json_to_cel(&json!(1.5)), Value::Float(1.5));
+    }
+
+    // ── parse_go_duration tests ─────────────────────────────────────
+
+    #[test]
+    fn parse_duration_hours() {
+        assert_eq!(
+            parse_go_duration("1h"),
+            Some(chrono::Duration::hours(1))
+        );
+    }
+
+    #[test]
+    fn parse_duration_minutes() {
+        assert_eq!(
+            parse_go_duration("30m"),
+            Some(chrono::Duration::minutes(30))
+        );
+    }
+
+    #[test]
+    fn parse_duration_seconds() {
+        assert_eq!(
+            parse_go_duration("45s"),
+            Some(chrono::Duration::seconds(45))
+        );
+    }
+
+    #[test]
+    fn parse_duration_milliseconds() {
+        assert_eq!(
+            parse_go_duration("500ms"),
+            Some(chrono::Duration::milliseconds(500))
+        );
+    }
+
+    #[test]
+    fn parse_duration_microseconds() {
+        assert_eq!(
+            parse_go_duration("100us"),
+            Some(chrono::Duration::microseconds(100))
+        );
+    }
+
+    #[test]
+    fn parse_duration_nanoseconds() {
+        assert_eq!(
+            parse_go_duration("999ns"),
+            Some(chrono::Duration::nanoseconds(999))
+        );
+    }
+
+    #[test]
+    fn parse_duration_compound() {
+        assert_eq!(
+            parse_go_duration("1h30m"),
+            Some(chrono::Duration::hours(1) + chrono::Duration::minutes(30))
+        );
+        assert_eq!(
+            parse_go_duration("1h30m10s"),
+            Some(
+                chrono::Duration::hours(1)
+                    + chrono::Duration::minutes(30)
+                    + chrono::Duration::seconds(10)
+            )
+        );
+    }
+
+    #[test]
+    fn parse_duration_negative() {
+        assert_eq!(
+            parse_go_duration("-1h"),
+            Some(chrono::Duration::hours(-1))
+        );
+        assert_eq!(
+            parse_go_duration("-30s"),
+            Some(chrono::Duration::seconds(-30))
+        );
+    }
+
+    #[test]
+    fn parse_duration_zero() {
+        assert_eq!(parse_go_duration("0"), Some(chrono::Duration::zero()));
+    }
+
+    #[test]
+    fn parse_duration_invalid() {
+        assert_eq!(parse_go_duration(""), None);
+        assert_eq!(parse_go_duration("abc"), None);
+        assert_eq!(parse_go_duration("1x"), None);
+        assert_eq!(parse_go_duration("h"), None);
+    }
+
+    // ── Schema-aware conversion tests ───────────────────────────────
+
+    #[test]
+    fn timestamp_parsed_from_schema() {
+        let schema = json!({
+            "type": "string",
+            "format": "date-time"
+        });
+        let value = json!("2024-01-01T00:00:00Z");
+        let result = json_to_cel_with_schema(&value, &schema);
+        assert!(matches!(result, Value::Timestamp(_)));
+    }
+
+    #[test]
+    fn timestamp_parse_failure_falls_back_to_string() {
+        let schema = json!({
+            "type": "string",
+            "format": "date-time"
+        });
+        let value = json!("not-a-date");
+        let result = json_to_cel_with_schema(&value, &schema);
+        assert_eq!(result, Value::String(Arc::new("not-a-date".into())));
+    }
+
+    #[test]
+    fn duration_parsed_from_schema() {
+        let schema = json!({
+            "type": "string",
+            "format": "duration"
+        });
+        let value = json!("1h30m");
+        let result = json_to_cel_with_schema(&value, &schema);
+        assert!(matches!(result, Value::Duration(_)));
+    }
+
+    #[test]
+    fn duration_parse_failure_falls_back_to_string() {
+        let schema = json!({
+            "type": "string",
+            "format": "duration"
+        });
+        let value = json!("not-a-duration");
+        let result = json_to_cel_with_schema(&value, &schema);
+        assert_eq!(result, Value::String(Arc::new("not-a-duration".into())));
+    }
+
+    #[test]
+    fn nested_object_properties_format() {
+        let schema = json!({
+            "type": "object",
+            "properties": {
+                "createdAt": {
+                    "type": "string",
+                    "format": "date-time"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "timeout": {
+                    "type": "string",
+                    "format": "duration"
+                }
+            }
+        });
+        let value = json!({
+            "createdAt": "2024-06-15T10:30:00Z",
+            "name": "test",
+            "timeout": "30s"
+        });
+        let result = json_to_cel_with_schema(&value, &schema);
+        if let Value::Map(map) = result {
+            assert!(matches!(
+                map.map.get(&Key::String(Arc::new("createdAt".into()))),
+                Some(Value::Timestamp(_))
+            ));
+            assert!(matches!(
+                map.map.get(&Key::String(Arc::new("name".into()))),
+                Some(Value::String(_))
+            ));
+            assert!(matches!(
+                map.map.get(&Key::String(Arc::new("timeout".into()))),
+                Some(Value::Duration(_))
+            ));
+        } else {
+            panic!("expected Map");
+        }
+    }
+
+    #[test]
+    fn array_items_format() {
+        let schema = json!({
+            "type": "array",
+            "items": {
+                "type": "string",
+                "format": "date-time"
+            }
+        });
+        let value = json!(["2024-01-01T00:00:00Z", "2024-06-15T12:00:00+09:00"]);
+        let result = json_to_cel_with_schema(&value, &schema);
+        if let Value::List(items) = result {
+            assert!(matches!(items[0], Value::Timestamp(_)));
+            assert!(matches!(items[1], Value::Timestamp(_)));
+        } else {
+            panic!("expected List");
+        }
+    }
+
+    #[test]
+    fn no_format_leaves_string_unchanged() {
+        let schema = json!({
+            "type": "string"
+        });
+        let value = json!("2024-01-01T00:00:00Z");
+        let result = json_to_cel_with_schema(&value, &schema);
+        assert_eq!(
+            result,
+            Value::String(Arc::new("2024-01-01T00:00:00Z".into()))
+        );
+    }
+
+    #[test]
+    fn json_to_cel_unchanged_with_no_schema() {
+        // Original json_to_cel should still work as before
+        let value = json!("2024-01-01T00:00:00Z");
+        let result = json_to_cel(&value);
+        assert_eq!(
+            result,
+            Value::String(Arc::new("2024-01-01T00:00:00Z".into()))
+        );
     }
 }

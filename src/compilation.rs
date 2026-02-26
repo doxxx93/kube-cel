@@ -7,6 +7,8 @@ use std::collections::HashMap;
 
 use cel::{ParseErrors, Program};
 
+use crate::values::SchemaFormat;
+
 /// A single CRD `x-kubernetes-validations` rule.
 #[derive(Clone, Debug, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -135,6 +137,8 @@ pub struct CompiledSchema {
     pub items: Option<Box<CompiledSchema>>,
     /// Compiled additionalProperties schema.
     pub additional_properties: Option<Box<CompiledSchema>>,
+    /// The `format` hint from the schema (e.g., `date-time`, `duration`).
+    pub format: SchemaFormat,
 }
 
 /// Recursively compile all `x-kubernetes-validations` rules in a schema tree.
@@ -158,11 +162,14 @@ pub fn compile_schema(schema: &serde_json::Value) -> CompiledSchema {
         .filter(|a| a.is_object())
         .map(|s| Box::new(compile_schema(s)));
 
+    let format = SchemaFormat::from_schema(schema);
+
     CompiledSchema {
         validations,
         properties,
         items,
         additional_properties,
+        format,
     }
 }
 

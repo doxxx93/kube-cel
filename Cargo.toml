@@ -17,6 +17,7 @@ ipnet = { version = "2", optional = true }
 semver = { version = "1", optional = true }
 serde = { version = "1", features = ["derive"], optional = true }
 serde_json = { version = "1", optional = true }
+chrono = { version = "0.4", default-features = false, features = ["alloc"], optional = true }
 
 [lints.rust]
 unsafe_code = "forbid"
@@ -32,7 +33,7 @@ ip = ["dep:ipnet"]
 semver_funcs = ["dep:semver"]
 format = []
 quantity = []
-validation = ["dep:serde_json", "dep:serde"]
+validation = ["dep:serde_json", "dep:serde", "dep:chrono"]
 
 [[example]]
 name = "validate_crd"
@@ -40,4 +41,8 @@ required-features = ["validation"]
 
 [[example]]
 name = "compiled_schema"
+required-features = ["validation"]
+
+[[example]]
+name = "timestamp_duration"
 required-features = ["validation"]

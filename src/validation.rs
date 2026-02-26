@@ -7,7 +7,7 @@
 use crate::compilation::{
     CompilationError, CompilationResult, CompiledSchema, compile_schema_validations,
 };
-use crate::values::json_to_cel;
+use crate::values::{json_to_cel_with_compiled, json_to_cel_with_schema};
 use cel::Context;
 
 /// An error produced when a CEL validation rule fails.
@@ -92,7 +92,9 @@ impl Validator {
         path: String,
         errors: &mut Vec<ValidationError>,
     ) {
-        self.evaluate_validations(schema, value, old_value, &path, errors);
+        let cel_value = json_to_cel_with_schema(value, schema);
+        let cel_old = old_value.map(|o| json_to_cel_with_schema(o, schema));
+        self.evaluate_validations(schema, &cel_value, cel_old.as_ref(), &path, errors);
 
         if let (Some(properties), Some(obj)) = (
             schema.get("properties").and_then(|p| p.as_object()),
@@ -139,13 +141,13 @@ impl Validator {
     fn evaluate_validations(
         &self,
         schema: &serde_json::Value,
-        value: &serde_json::Value,
-        old_value: Option<&serde_json::Value>,
+        cel_value: &cel::Value,
+        cel_old: Option<&cel::Value>,
         path: &str,
         errors: &mut Vec<ValidationError>,
     ) {
         let compiled = compile_schema_validations(schema);
-        self.evaluate_compiled_results(&compiled, value, old_value, path, errors);
+        self.evaluate_compiled_results(&compiled, cel_value, cel_old, path, errors);
     }
 
     // ── CompiledSchema-based walking ────────────────────────────────
@@ -158,7 +160,15 @@ impl Validator {
         path: String,
         errors: &mut Vec<ValidationError>,
     ) {
-        self.evaluate_compiled_results(&compiled.validations, value, old_value, &path, errors);
+        let cel_value = json_to_cel_with_compiled(value, compiled);
+        let cel_old = old_value.map(|o| json_to_cel_with_compiled(o, compiled));
+        self.evaluate_compiled_results(
+            &compiled.validations,
+            &cel_value,
+            cel_old.as_ref(),
+            &path,
+            errors,
+        );
 
         if let Some(obj) = value.as_object() {
             for (prop_name, child_compiled) in &compiled.properties {
@@ -197,15 +207,15 @@ impl Validator {
     fn evaluate_compiled_results(
         &self,
         results: &[Result<CompilationResult, CompilationError>],
-        value: &serde_json::Value,
-        old_value: Option<&serde_json::Value>,
+        cel_value: &cel::Value,
+        cel_old: Option<&cel::Value>,
         path: &str,
         errors: &mut Vec<ValidationError>,
     ) {
         for result in results {
             match result {
                 Ok(cr) => {
-                    self.evaluate_rule(cr, value, old_value, path, errors);
+                    self.evaluate_rule(cr, cel_value, cel_old, path, errors);
                 }
                 Err(CompilationError::Parse { rule, source }) => {
                     errors.push(ValidationError {
@@ -230,22 +240,22 @@ impl Validator {
     fn evaluate_rule(
         &self,
         cr: &CompilationResult,
-        value: &serde_json::Value,
-        old_value: Option<&serde_json::Value>,
+        cel_value: &cel::Value,
+        cel_old: Option<&cel::Value>,
         path: &str,
         errors: &mut Vec<ValidationError>,
     ) {
         // Handle transition rules
-        if cr.is_transition_rule && old_value.is_none() && cr.rule.optional_old_self != Some(true) {
+        if cr.is_transition_rule && cel_old.is_none() && cr.rule.optional_old_self != Some(true) {
             return; // skip transition rule without old value
         }
 
         let mut ctx = Context::default();
         crate::register_all(&mut ctx);
-        ctx.add_variable_from_value("self", json_to_cel(value));
+        ctx.add_variable_from_value("self", cel_value.clone());
 
-        if let Some(old) = old_value {
-            ctx.add_variable_from_value("oldSelf", json_to_cel(old));
+        if let Some(old) = cel_old {
+            ctx.add_variable_from_value("oldSelf", old.clone());
         } else if cr.rule.optional_old_self == Some(true) {
             ctx.add_variable_from_value("oldSelf", cel::Value::Null);
         }
