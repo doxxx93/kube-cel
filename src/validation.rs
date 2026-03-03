@@ -324,12 +324,14 @@ impl Validator {
             cr.program.execute(node_ctx)
         };
 
+        let error_path = effective_path(path, cr.rule.field_path.as_deref());
+
         match result {
             Ok(cel::Value::Bool(true)) => {
                 // Validation passed
             }
             Ok(cel::Value::Bool(false)) => {
-                let ctx_for_msg = if cel_old.is_none() && cr.rule.optional_old_self == Some(true) {
+                let message = if cel_old.is_none() && cr.rule.optional_old_self == Some(true) {
                     let mut scope = node_ctx.new_inner_scope();
                     scope.add_variable_from_value("oldSelf", cel::Value::Null);
                     self.resolve_message(cr, &scope)
@@ -338,8 +340,8 @@ impl Validator {
                 };
                 errors.push(ValidationError {
                     rule: cr.rule.rule.clone(),
-                    message: ctx_for_msg,
-                    field_path: path.to_string(),
+                    message,
+                    field_path: error_path,
                     reason: cr.rule.reason.clone(),
                 });
             }
@@ -347,7 +349,7 @@ impl Validator {
                 errors.push(ValidationError {
                     rule: cr.rule.rule.clone(),
                     message: format!("rule \"{}\" did not evaluate to bool", cr.rule.rule),
-                    field_path: path.to_string(),
+                    field_path: error_path,
                     reason: None,
                 });
             }
@@ -355,7 +357,7 @@ impl Validator {
                 errors.push(ValidationError {
                     rule: cr.rule.rule.clone(),
                     message: format!("rule evaluation error: {e}"),
-                    field_path: path.to_string(),
+                    field_path: error_path,
                     reason: None,
                 });
             }
@@ -406,6 +408,15 @@ pub fn validate_compiled(
 }
 
 // ── Path helpers ────────────────────────────────────────────────────
+
+fn effective_path(base_path: &str, rule_field_path: Option<&str>) -> String {
+    match rule_field_path {
+        Some(fp) if fp.starts_with('.') => format!("{base_path}{fp}"),
+        Some(fp) if !base_path.is_empty() => format!("{base_path}.{fp}"),
+        Some(fp) => fp.to_string(),
+        None => base_path.to_string(),
+    }
+}
 
 fn join_path(base: &str, segment: &str) -> String {
     if base.is_empty() {
@@ -797,5 +808,90 @@ mod tests {
             validate_compiled(&compiled, &json!({"x": 0}), None).len(),
             1
         );
+    }
+
+    // ── fieldPath override tests ────────────────────────────────────
+
+    #[test]
+    fn fieldpath_overrides_auto_path() {
+        let schema = json!({
+            "type": "object",
+            "properties": {
+                "spec": {
+                    "type": "object",
+                    "properties": {
+                        "x": {"type": "integer"}
+                    },
+                    "x-kubernetes-validations": [
+                        {"rule": "self.x >= 0", "message": "bad", "fieldPath": ".spec.x"}
+                    ]
+                }
+            }
+        });
+        let obj = json!({"spec": {"x": -1}});
+        let errors = validate(&schema, &obj, None);
+        assert_eq!(errors.len(), 1);
+        assert_eq!(errors[0].field_path, "spec.spec.x");
+    }
+
+    #[test]
+    fn fieldpath_without_dot() {
+        let schema = json!({
+            "type": "object",
+            "properties": {
+                "spec": {
+                    "type": "object",
+                    "properties": {
+                        "name": {"type": "string"}
+                    },
+                    "x-kubernetes-validations": [
+                        {"rule": "self.name.size() > 0", "message": "bad", "fieldPath": "name"}
+                    ]
+                }
+            }
+        });
+        let obj = json!({"spec": {"name": ""}});
+        let errors = validate(&schema, &obj, None);
+        assert_eq!(errors.len(), 1);
+        assert_eq!(errors[0].field_path, "spec.name");
+    }
+
+    #[test]
+    fn fieldpath_at_root() {
+        let schema = json!({
+            "type": "object",
+            "properties": {
+                "x": {"type": "integer"}
+            },
+            "x-kubernetes-validations": [
+                {"rule": "self.x >= 0", "message": "bad", "fieldPath": ".spec.x"}
+            ]
+        });
+        let obj = json!({"x": -1});
+        let errors = validate(&schema, &obj, None);
+        assert_eq!(errors.len(), 1);
+        assert_eq!(errors[0].field_path, ".spec.x");
+    }
+
+    #[test]
+    fn fieldpath_none_uses_auto() {
+        let schema = json!({
+            "type": "object",
+            "properties": {
+                "spec": {
+                    "type": "object",
+                    "properties": {
+                        "x": {"type": "integer"}
+                    },
+                    "x-kubernetes-validations": [
+                        {"rule": "self.x >= 0", "message": "bad"}
+                    ]
+                }
+            }
+        });
+        let obj = json!({"spec": {"x": -1}});
+        let errors = validate(&schema, &obj, None);
+        assert_eq!(errors.len(), 1);
+        assert_eq!(errors[0].field_path, "spec");
     }
 }
