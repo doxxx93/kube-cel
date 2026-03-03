@@ -10,8 +10,23 @@ use crate::compilation::{
 use crate::values::{json_to_cel_with_compiled, json_to_cel_with_schema};
 use cel::Context;
 
+/// The kind of error that occurred during validation.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ErrorKind {
+    /// CEL expression syntax error.
+    CompilationFailure,
+    /// Malformed rule JSON.
+    InvalidRule,
+    /// Rule evaluated to `false`.
+    ValidationFailure,
+    /// Rule returned a non-bool value.
+    InvalidResult,
+    /// Runtime evaluation error.
+    EvaluationError,
+}
+
 /// An error produced when a CEL validation rule fails.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ValidationError {
     /// The CEL expression that failed.
     pub rule: String,
@@ -21,6 +36,8 @@ pub struct ValidationError {
     pub field_path: String,
     /// Machine-readable reason (e.g., "FieldValueInvalid").
     pub reason: Option<String>,
+    /// Classification of the error.
+    pub kind: ErrorKind,
 }
 
 impl std::fmt::Display for ValidationError {
@@ -288,6 +305,7 @@ impl Validator {
                         message: format!("failed to compile rule \"{rule}\": {source}"),
                         field_path: path.to_string(),
                         reason: None,
+                        kind: ErrorKind::CompilationFailure,
                     });
                 }
                 Err(CompilationError::InvalidRule(e)) => {
@@ -296,6 +314,7 @@ impl Validator {
                         message: format!("invalid rule definition: {e}"),
                         field_path: path.to_string(),
                         reason: None,
+                        kind: ErrorKind::InvalidRule,
                     });
                 }
             }
@@ -343,6 +362,7 @@ impl Validator {
                     message,
                     field_path: error_path,
                     reason: cr.rule.reason.clone(),
+                    kind: ErrorKind::ValidationFailure,
                 });
             }
             Ok(_) => {
@@ -351,6 +371,7 @@ impl Validator {
                     message: format!("rule \"{}\" did not evaluate to bool", cr.rule.rule),
                     field_path: error_path,
                     reason: None,
+                    kind: ErrorKind::InvalidResult,
                 });
             }
             Err(e) => {
@@ -359,6 +380,7 @@ impl Validator {
                     message: format!("rule evaluation error: {e}"),
                     field_path: error_path,
                     reason: None,
+                    kind: ErrorKind::EvaluationError,
                 });
             }
         }
@@ -644,6 +666,7 @@ mod tests {
             message: "must be non-negative".into(),
             field_path: "spec.replicas".into(),
             reason: None,
+            kind: ErrorKind::ValidationFailure,
         };
         assert_eq!(err.to_string(), "spec.replicas: must be non-negative");
     }
@@ -655,6 +678,7 @@ mod tests {
             message: "must be non-negative".into(),
             field_path: String::new(),
             reason: None,
+            kind: ErrorKind::ValidationFailure,
         };
         assert_eq!(err.to_string(), "must be non-negative");
     }
@@ -893,5 +917,40 @@ mod tests {
         let errors = validate(&schema, &obj, None);
         assert_eq!(errors.len(), 1);
         assert_eq!(errors[0].field_path, "spec");
+    }
+
+    // ── ErrorKind tests ─────────────────────────────────────────────
+
+    #[test]
+    fn error_kind_compilation_failure() {
+        let schema = make_schema(json!([
+            {"rule": "self.replicas >="}
+        ]));
+        let obj = json!({"replicas": 1, "name": "app"});
+        let errors = validate(&schema, &obj, None);
+        assert_eq!(errors.len(), 1);
+        assert_eq!(errors[0].kind, ErrorKind::CompilationFailure);
+    }
+
+    #[test]
+    fn error_kind_validation_failure() {
+        let schema = make_schema(json!([
+            {"rule": "self.replicas >= 0", "message": "must be non-negative"}
+        ]));
+        let obj = json!({"replicas": -1, "name": "app"});
+        let errors = validate(&schema, &obj, None);
+        assert_eq!(errors.len(), 1);
+        assert_eq!(errors[0].kind, ErrorKind::ValidationFailure);
+    }
+
+    #[test]
+    fn error_kind_evaluation_error() {
+        let schema = make_schema(json!([
+            {"rule": "self.missing_field > 0"}
+        ]));
+        let obj = json!({"replicas": 1, "name": "app"});
+        let errors = validate(&schema, &obj, None);
+        assert_eq!(errors.len(), 1);
+        assert_eq!(errors[0].kind, ErrorKind::EvaluationError);
     }
 }

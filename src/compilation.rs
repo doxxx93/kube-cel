@@ -141,6 +141,23 @@ pub struct CompiledSchema {
     pub format: SchemaFormat,
 }
 
+impl CompiledSchema {
+    /// Returns references to all compilation errors in this node's validations.
+    #[must_use]
+    pub fn compilation_errors(&self) -> Vec<&CompilationError> {
+        self.validations
+            .iter()
+            .filter_map(|r| r.as_ref().err())
+            .collect()
+    }
+
+    /// Returns `true` if any validation rule at this node failed to compile.
+    #[must_use]
+    pub fn has_errors(&self) -> bool {
+        self.validations.iter().any(|r| r.is_err())
+    }
+}
+
 /// Recursively compile all `x-kubernetes-validations` rules in a schema tree.
 ///
 /// Returns a [`CompiledSchema`] that can be reused across multiple validation
@@ -406,5 +423,34 @@ mod tests {
         assert!(results[0].is_ok());
         assert!(results[1].is_err());
         assert!(results[2].is_ok());
+    }
+
+    #[test]
+    fn compilation_errors_method() {
+        let schema = json!({
+            "x-kubernetes-validations": [
+                {"rule": "self.x > 0"},
+                {"rule": "self.y >="},
+                {"rule": "self.z == true"}
+            ]
+        });
+        let compiled = compile_schema(&schema);
+        let errors = compiled.compilation_errors();
+        assert_eq!(errors.len(), 1);
+        assert!(matches!(errors[0], CompilationError::Parse { .. }));
+        assert!(compiled.has_errors());
+    }
+
+    #[test]
+    fn compilation_errors_empty_when_all_valid() {
+        let schema = json!({
+            "x-kubernetes-validations": [
+                {"rule": "self.x > 0"},
+                {"rule": "self.z == true"}
+            ]
+        });
+        let compiled = compile_schema(&schema);
+        assert!(compiled.compilation_errors().is_empty());
+        assert!(!compiled.has_errors());
     }
 }
