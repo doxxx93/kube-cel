@@ -24,6 +24,7 @@ enum FormatKind {
     Dns1123Label,
     Dns1123Subdomain,
     Dns1035Label,
+    Dns1035LabelPrefix,
     Dns1123LabelPrefix,
     Dns1123SubdomainPrefix,
     QualifiedName,
@@ -41,6 +42,7 @@ impl fmt::Display for FormatKind {
             FormatKind::Dns1123Label => "dns1123Label",
             FormatKind::Dns1123Subdomain => "dns1123Subdomain",
             FormatKind::Dns1035Label => "dns1035Label",
+            FormatKind::Dns1035LabelPrefix => "dns1035LabelPrefix",
             FormatKind::Dns1123LabelPrefix => "dns1123LabelPrefix",
             FormatKind::Dns1123SubdomainPrefix => "dns1123SubdomainPrefix",
             FormatKind::QualifiedName => "qualifiedName",
@@ -78,6 +80,7 @@ pub fn register(ctx: &mut Context<'_>) {
     ctx.add_function("format.dns1123Label", format_dns1123_label);
     ctx.add_function("format.dns1123Subdomain", format_dns1123_subdomain);
     ctx.add_function("format.dns1035Label", format_dns1035_label);
+    ctx.add_function("format.dns1035LabelPrefix", format_dns1035_label_prefix);
     ctx.add_function("format.dns1123LabelPrefix", format_dns1123_label_prefix);
     ctx.add_function(
         "format.dns1123SubdomainPrefix",
@@ -115,6 +118,12 @@ fn format_dns1123_subdomain() -> ResolveResult {
 fn format_dns1035_label() -> ResolveResult {
     Ok(Value::Opaque(Arc::new(KubeFormat(
         FormatKind::Dns1035Label,
+    ))))
+}
+
+fn format_dns1035_label_prefix() -> ResolveResult {
+    Ok(Value::Opaque(Arc::new(KubeFormat(
+        FormatKind::Dns1035LabelPrefix,
     ))))
 }
 
@@ -169,6 +178,7 @@ fn format_named(name: Arc<String>) -> ResolveResult {
         "dns1123Label" => FormatKind::Dns1123Label,
         "dns1123Subdomain" => FormatKind::Dns1123Subdomain,
         "dns1035Label" => FormatKind::Dns1035Label,
+        "dns1035LabelPrefix" => FormatKind::Dns1035LabelPrefix,
         "dns1123LabelPrefix" => FormatKind::Dns1123LabelPrefix,
         "dns1123SubdomainPrefix" => FormatKind::Dns1123SubdomainPrefix,
         "qualifiedName" => FormatKind::QualifiedName,
@@ -224,6 +234,7 @@ fn validate_format(kind: &FormatKind, s: &str) -> Vec<String> {
         FormatKind::Dns1123Label => validate_dns1123_label(s),
         FormatKind::Dns1123Subdomain => validate_dns1123_subdomain(s),
         FormatKind::Dns1035Label => validate_dns1035_label(s),
+        FormatKind::Dns1035LabelPrefix => validate_dns1035_label_prefix(s),
         FormatKind::Dns1123LabelPrefix => validate_dns1123_label_prefix(s),
         FormatKind::Dns1123SubdomainPrefix => validate_dns1123_subdomain_prefix(s),
         FormatKind::QualifiedName => validate_qualified_name(s),
@@ -293,6 +304,31 @@ fn validate_dns1035_label(s: &str) -> Vec<String> {
 fn is_dns1035_char_set(s: &str) -> bool {
     s.chars()
         .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+}
+
+// -- DNS 1035 Label Prefix --
+
+fn validate_dns1035_label_prefix(s: &str) -> Vec<String> {
+    let mut errors = Vec::new();
+    // Empty string is valid for prefix
+    if s.is_empty() {
+        return errors;
+    }
+    if s.len() > 63 {
+        errors.push(format!(
+            "must be no more than 63 characters (is {})",
+            s.len()
+        ));
+    }
+    if !is_dns1035_char_set(s) {
+        errors.push("must consist of lower case alphanumeric characters or '-'".to_string());
+    }
+    // Must start with a lowercase alphabetic character
+    if !s.starts_with(|c: char| c.is_ascii_lowercase()) {
+        errors.push("must start with a lowercase alphabetic character".to_string());
+    }
+    // Trailing hyphen is allowed (prefix), so no end check
+    errors
 }
 
 // -- DNS 1123 Subdomain --
@@ -862,6 +898,27 @@ mod tests {
         assert_invalid("format.dns1123LabelPrefix().validate('')");
         assert_invalid("format.dns1123LabelPrefix().validate('-start')");
         assert_invalid("format.dns1123LabelPrefix().validate('UPPER')");
+    }
+
+    // -- DNS 1035 Label Prefix --
+
+    #[test]
+    fn test_dns1035_label_prefix_valid() {
+        assert_valid("format.dns1035LabelPrefix().validate('my-prefix-')");
+        assert_valid("format.dns1035LabelPrefix().validate('')"); // empty is valid
+        assert_valid("format.dns1035LabelPrefix().validate('a')");
+        assert_valid("format.dns1035LabelPrefix().validate('ok-')");
+    }
+
+    #[test]
+    fn test_dns1035_label_prefix_invalid() {
+        assert_invalid("format.dns1035LabelPrefix().validate('1start-')"); // must start with letter
+        assert_invalid("format.dns1035LabelPrefix().validate('UPPER')"); // uppercase
+    }
+
+    #[test]
+    fn test_dns1035_label_prefix_via_named() {
+        assert_valid("format.named('dns1035LabelPrefix').validate('ok-')");
     }
 
     // -- DNS 1123 Subdomain Prefix --
