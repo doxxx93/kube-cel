@@ -262,17 +262,24 @@ pub(crate) fn string_reverse(This(this): This<Arc<String>>) -> ResolveResult {
 
 /// `strings.quote(<string>) -> <string>`
 fn strings_quote(s: Arc<String>) -> ResolveResult {
-    let escaped = s
-        .replace('\\', "\\\\")
-        .replace('"', "\\\"")
-        .replace('\x07', "\\a")
-        .replace('\x08', "\\b")
-        .replace('\x0C', "\\f")
-        .replace('\n', "\\n")
-        .replace('\r', "\\r")
-        .replace('\t', "\\t")
-        .replace('\x0B', "\\v");
-    Ok(Value::String(Arc::new(format!("\"{escaped}\""))))
+    let mut escaped = String::with_capacity(s.len() + 2);
+    escaped.push('"');
+    for ch in s.chars() {
+        match ch {
+            '\\' => escaped.push_str("\\\\"),
+            '"' => escaped.push_str("\\\""),
+            '\x07' => escaped.push_str("\\a"),
+            '\x08' => escaped.push_str("\\b"),
+            '\x0C' => escaped.push_str("\\f"),
+            '\n' => escaped.push_str("\\n"),
+            '\r' => escaped.push_str("\\r"),
+            '\t' => escaped.push_str("\\t"),
+            '\x0B' => escaped.push_str("\\v"),
+            c => escaped.push(c),
+        }
+    }
+    escaped.push('"');
+    Ok(Value::String(Arc::new(escaped)))
 }
 
 #[cfg(test)]

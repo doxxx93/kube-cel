@@ -145,20 +145,16 @@ fn get_escaped_path(This(this): This<Value>) -> ResolveResult {
 /// Returns query parameters as a map of string keys to lists of string values.
 fn get_query(This(this): This<Value>) -> ResolveResult {
     let url = extract_url(&this)?;
-    let mut map: HashMap<Key, Value> = HashMap::new();
-
+    let mut raw: HashMap<String, Vec<Value>> = HashMap::new();
     for (key, value) in url.0.query_pairs() {
-        let k = Key::String(Arc::new(key.to_string()));
-        let entry = map
-            .entry(k)
-            .or_insert_with(|| Value::List(Arc::new(Vec::new())));
-        if let Value::List(list) = entry {
-            let mut new_list = list.as_ref().clone();
-            new_list.push(Value::String(Arc::new(value.to_string())));
-            *entry = Value::List(Arc::new(new_list));
-        }
+        raw.entry(key.into_owned())
+            .or_default()
+            .push(Value::String(Arc::new(value.into_owned())));
     }
-
+    let map = raw
+        .into_iter()
+        .map(|(k, v)| (Key::String(Arc::new(k)), Value::List(Arc::new(v))))
+        .collect();
     Ok(Value::Map(Map { map: Arc::new(map) }))
 }
 
