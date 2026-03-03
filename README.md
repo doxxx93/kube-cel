@@ -102,6 +102,18 @@ let schema = json!({
 
 Invalid strings gracefully fall back to `Value::String`.
 
+### Field name escaping
+
+JSON field names that are CEL reserved words or contain special characters are automatically escaped when converting to CEL map keys, matching K8s API server behavior:
+
+| JSON field name | CEL access |
+|----------------|------------|
+| `namespace` | `self.__namespace__` |
+| `foo-bar` | `self.foo__dash__bar` |
+| `a.b` | `self.a__dot__b` |
+| `x/y` | `self.x__slash__y` |
+| `my_field` | `self.my__field` |
+
 ## Supported Functions
 
 ### Strings
@@ -131,6 +143,32 @@ Invalid strings gracefully fall back to `Value::String`.
 ### Format
 `<string>.format(<list>)` with verbs: `%s`, `%d`, `%f`, `%e`, `%b`, `%o`, `%x`, `%X`
 
+### Named Format Validation
+`format.dns1123Label`, `format.dns1123Subdomain`, `format.dns1035Label`, `format.dns1123LabelPrefix`, `format.dns1123SubdomainPrefix`, `format.qualifiedName`, `format.labelValue`, `format.uri`, `format.uuid`, `format.byte`, `format.date`, `format.datetime`, `format.named`, `validate`
+
+```rust
+// Returns optional: none = valid, of([...errors]) = invalid
+// K8s pattern: !format.<name>().validate(value).hasValue()
+let result = Program::compile("!format.dns1123Label().validate('my-name').hasValue()")
+    .unwrap().execute(&ctx).unwrap();
+// Value::Bool(true)
+
+// Dynamic format lookup
+let result = Program::compile("!format.named('uuid').validate('550e8400-e29b-41d4-a716-446655440000').hasValue()")
+    .unwrap().execute(&ctx).unwrap();
+// Value::Bool(true)
+```
+
+### JSONPatch
+`jsonpatch.escapeKey`
+
+```rust
+// RFC 6901: ~ → ~0, / → ~1
+let result = Program::compile("jsonpatch.escapeKey('k8s.io/my~label')")
+    .unwrap().execute(&ctx).unwrap();
+// Value::String("k8s.io~1my~0label")
+```
+
 ## Feature Flags
 
 All features are enabled by default. Disable with `default-features = false` and pick what you need:
@@ -146,6 +184,8 @@ All features are enabled by default. Disable with `default-features = false` and
 | `semver_funcs` | `semver` | Semantic versioning |
 | `format` | - | String formatting |
 | `quantity` | - | Kubernetes resource quantities |
+| `jsonpatch` | - | JSONPatch key escaping (RFC 6901) |
+| `named_format` | - | Named format validation (`format.dns1123Label()`, etc.) |
 | `validation` | `serde_json`, `serde`, `chrono` | CRD validation pipeline (compile + evaluate `x-kubernetes-validations`, `format: date-time/duration`) |
 
 ## Related

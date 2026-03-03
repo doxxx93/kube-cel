@@ -1,19 +1,40 @@
 # Changelog
 
+## [0.3.1] - 2026-03-03
+
+### Added
+
+- **Named format validation library** (`named_format` feature)
+  - `format.dns1123Label()`, `format.dns1123Subdomain()`, `format.dns1035Label()` — DNS name validators
+  - `format.dns1123LabelPrefix()`, `format.dns1123SubdomainPrefix()` — prefix validators (trailing hyphen allowed)
+  - `format.qualifiedName()`, `format.labelValue()` — K8s label validators
+  - `format.uri()`, `format.uuid()`, `format.byte()`, `format.date()`, `format.datetime()` — common format validators
+  - `format.named(<string>)` — dynamic format lookup by name
+  - `<Format>.validate(<string>) -> optional<list<string>>` — `optional.none()` if valid, `optional.of([...errors])` if invalid
+  - K8s pattern: `!format.dns1123Label().validate(name).hasValue()`
+- **JSONPatch key escaping** (`jsonpatch` feature)
+  - `jsonpatch.escapeKey(<string>) -> string` — RFC 6901 escape (`~` → `~0`, `/` → `~1`)
+- **Field name escaping for Kubernetes CEL**
+  - `escaping::escape_field_name()` — escape CEL reserved words and special character field names
+  - CEL reserved words (`namespace`, `in`, `return`, etc.) → `__keyword__`
+  - Special characters (`_`, `.`, `-`, `/`) → per-character substitution (`__`, `__dot__`, `__dash__`, `__slash__`)
+  - Matches K8s Go apiserver logic (`apiserver/schema/cel/model`)
+  - Applied in `json_to_cel`, `json_to_cel_with_schema`, and `json_to_cel_with_compiled`
+
 ## [0.3.0] - 2026-02-26
 
 ### Added
 
 - **Schema-aware `format: date-time` / `format: duration` support**
   - `values::SchemaFormat` enum — `DateTime`, `Duration`, `None`
-  - `values::json_to_cel_with_schema()` — raw JSON schema 기반 재귀 변환
-  - `values::json_to_cel_with_compiled()` — `CompiledSchema` 메타데이터 기반 변환
-  - `values::parse_go_duration()` — Go 스타일 duration 파싱 (`"1h30m"`, `"-5s"` 등)
-  - `compilation::CompiledSchema.format` 필드 추가
-  - `validation` 모듈에서 자동으로 스키마 인식 변환 적용
-  - 파싱 실패 시 `Value::String`으로 graceful fallback
+  - `values::json_to_cel_with_schema()` — recursive conversion based on raw JSON schema
+  - `values::json_to_cel_with_compiled()` — conversion based on `CompiledSchema` metadata
+  - `values::parse_go_duration()` — parse Go-style durations (`"1h30m"`, `"-5s"`, etc.)
+  - Added `compilation::CompiledSchema.format` field
+  - Automatic schema-aware conversion applied in `validation` module
+  - Graceful fallback to `Value::String` on parse failure
 - Example: `timestamp_duration`
-- `chrono` dependency (validation feature에 포함)
+- `chrono` dependency (included in `validation` feature)
 
 ## [0.2.1] - 2026-02-25
 
