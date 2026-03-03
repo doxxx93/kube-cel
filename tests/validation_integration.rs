@@ -1239,3 +1239,129 @@ fn nested_object_timestamp_access() {
     assert_eq!(errors[0].field_path, "spec.certificate");
     assert_eq!(errors[0].message, "notAfter must be after notBefore");
 }
+
+// ── Field name escaping ─────────────────────────────────────────────
+
+#[test]
+fn reserved_word_field_name() {
+    // "namespace" is a CEL reserved word; in CEL it must be accessed as __namespace__
+    let schema = json!({
+        "type": "object",
+        "properties": {
+            "namespace": {"type": "string"}
+        },
+        "x-kubernetes-validations": [{
+            "rule": "self.__namespace__ == 'default'",
+            "message": "namespace must be default"
+        }]
+    });
+
+    let pass = json!({"namespace": "default"});
+    assert!(validate(&schema, &pass, None).is_empty());
+
+    let fail = json!({"namespace": "kube-system"});
+    let errors = validate(&schema, &fail, None);
+    assert_eq!(errors.len(), 1);
+    assert_eq!(errors[0].message, "namespace must be default");
+}
+
+#[test]
+fn dash_in_field_name() {
+    let schema = json!({
+        "type": "object",
+        "properties": {
+            "app-name": {"type": "string"}
+        },
+        "x-kubernetes-validations": [{
+            "rule": "self.app__dash__name.size() > 0",
+            "message": "app-name must not be empty"
+        }]
+    });
+
+    let pass = json!({"app-name": "myapp"});
+    assert!(validate(&schema, &pass, None).is_empty());
+
+    let fail = json!({"app-name": ""});
+    let errors = validate(&schema, &fail, None);
+    assert_eq!(errors.len(), 1);
+    assert_eq!(errors[0].message, "app-name must not be empty");
+}
+
+#[test]
+fn dot_in_field_name() {
+    let schema = json!({
+        "type": "object",
+        "properties": {
+            "app.kubernetes.io/name": {"type": "string"}
+        },
+        "x-kubernetes-validations": [{
+            "rule": "self.app__dot__kubernetes__dot__io__slash__name == 'nginx'",
+            "message": "annotation must be nginx"
+        }]
+    });
+
+    let pass = json!({"app.kubernetes.io/name": "nginx"});
+    assert!(validate(&schema, &pass, None).is_empty());
+
+    let fail = json!({"app.kubernetes.io/name": "apache"});
+    let errors = validate(&schema, &fail, None);
+    assert_eq!(errors.len(), 1);
+    assert_eq!(errors[0].message, "annotation must be nginx");
+}
+
+#[test]
+fn underscore_in_field_name() {
+    let schema = json!({
+        "type": "object",
+        "properties": {
+            "my_field": {"type": "integer"}
+        },
+        "x-kubernetes-validations": [{
+            "rule": "self.my__field > 0",
+            "message": "my_field must be positive"
+        }]
+    });
+
+    let pass = json!({"my_field": 5});
+    assert!(validate(&schema, &pass, None).is_empty());
+
+    let fail = json!({"my_field": -1});
+    let errors = validate(&schema, &fail, None);
+    assert_eq!(errors.len(), 1);
+    assert_eq!(errors[0].message, "my_field must be positive");
+}
+
+#[test]
+fn escaped_field_with_compiled_schema() {
+    use kube_cel::compilation::compile_schema;
+    use kube_cel::validation::validate_compiled;
+
+    let schema = json!({
+        "type": "object",
+        "properties": {
+            "namespace": {"type": "string"},
+            "my-value": {"type": "integer"}
+        },
+        "x-kubernetes-validations": [
+            {
+                "rule": "self.__namespace__.size() > 0",
+                "message": "namespace required"
+            },
+            {
+                "rule": "self.my__dash__value >= 0",
+                "message": "my-value must be non-negative"
+            }
+        ]
+    });
+
+    let compiled = compile_schema(&schema);
+
+    let pass = json!({"namespace": "default", "my-value": 10});
+    assert!(validate_compiled(&compiled, &pass, None).is_empty());
+
+    let fail = json!({"namespace": "", "my-value": -1});
+    let errors = validate_compiled(&compiled, &fail, None);
+    assert_eq!(errors.len(), 2);
+    assert!(errors.iter().any(|e| e.message == "namespace required"));
+    assert!(errors.iter().any(|e| e.message == "my-value must be non-negative"));
+}

@@ -16,6 +16,7 @@ use cel::Value;
 use cel::objects::{Key, Map};
 
 use crate::compilation::CompiledSchema;
+use crate::escaping::escape_field_name;
 
 /// The `format` hint from an OpenAPI schema property.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -61,7 +62,7 @@ pub fn json_to_cel(value: &serde_json::Value) -> Value {
         serde_json::Value::Object(obj) => {
             let mut map = HashMap::with_capacity(obj.len());
             for (k, v) in obj {
-                map.insert(Key::String(Arc::new(k.clone())), json_to_cel(v));
+                map.insert(Key::String(Arc::new(escape_field_name(k))), json_to_cel(v));
             }
             Value::Map(Map { map: Arc::new(map) })
         }
@@ -115,7 +116,7 @@ pub fn json_to_cel_with_schema(value: &serde_json::Value, schema: &serde_json::V
                 } else {
                     json_to_cel(v)
                 };
-                map.insert(Key::String(Arc::new(k.clone())), child_val);
+                map.insert(Key::String(Arc::new(escape_field_name(k))), child_val);
             }
             Value::Map(Map { map: Arc::new(map) })
         }
@@ -152,7 +153,7 @@ pub fn json_to_cel_with_compiled(value: &serde_json::Value, compiled: &CompiledS
                 } else {
                     json_to_cel(v)
                 };
-                map.insert(Key::String(Arc::new(k.clone())), child_val);
+                map.insert(Key::String(Arc::new(escape_field_name(k))), child_val);
             }
             Value::Map(Map { map: Arc::new(map) })
         }

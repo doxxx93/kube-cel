@@ -70,6 +70,9 @@ pub mod format;
 pub mod quantity;
 
 #[cfg(feature = "validation")]
+pub mod escaping;
+
+#[cfg(feature = "validation")]
 pub mod values;
 
 #[cfg(feature = "validation")]
