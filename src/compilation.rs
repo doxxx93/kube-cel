@@ -51,7 +51,12 @@ pub struct CompilationResult {
 #[derive(Debug)]
 pub enum CompilationError {
     /// CEL expression failed to parse.
-    Parse { rule: String, source: ParseErrors },
+    Parse {
+        /// The original CEL expression that failed to compile.
+        rule: String,
+        /// The parse errors reported by the CEL compiler.
+        source: ParseErrors,
+    },
     /// JSON value could not be deserialized into a [`Rule`].
     InvalidRule(serde_json::Error),
 }
