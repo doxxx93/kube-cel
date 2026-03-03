@@ -15,7 +15,13 @@ use std::sync::Arc;
 
 /// A Kubernetes CEL IP address value.
 #[derive(Debug, Clone, Eq, PartialEq)]
-pub struct KubeIP(IpAddr);
+pub struct KubeIP(pub(crate) IpAddr);
+
+impl KubeIP {
+    pub(crate) fn new(addr: IpAddr) -> Self {
+        Self(addr)
+    }
+}
 
 impl Opaque for KubeIP {
     fn runtime_type_name(&self) -> &str {
@@ -46,6 +52,10 @@ pub fn register(ctx: &mut Context<'_>) {
     ctx.add_function("isLinkLocalUnicast", ip_is_link_local_unicast);
     ctx.add_function("isGlobalUnicast", ip_is_global_unicast);
 
+    // IP version convenience functions
+    ctx.add_function("isIPv4", is_ipv4);
+    ctx.add_function("isIPv6", is_ipv6);
+
     // CIDR functions
     ctx.add_function("cidr", parse_cidr);
     ctx.add_function("isCIDR", is_cidr);
@@ -53,12 +63,16 @@ pub fn register(ctx: &mut Context<'_>) {
     ctx.add_function("containsCIDR", cidr_contains_cidr);
     ctx.add_function("prefixLength", cidr_prefix_length);
     ctx.add_function("masked", cidr_masked);
+
+    // CIDR version convenience functions
+    ctx.add_function("isCIDRv4", is_cidr_v4);
+    ctx.add_function("isCIDRv6", is_cidr_v6);
 }
 
 // --- Parsing helpers ---
 
 /// Parse an IP address string, rejecting IPv4-mapped IPv6 and zone IDs.
-fn parse_ip_addr(s: &str) -> Result<IpAddr, String> {
+pub(crate) fn parse_ip_addr(s: &str) -> Result<IpAddr, String> {
     // Reject zone identifiers (e.g., fe80::1%eth0)
     if s.contains('%') {
         return Err("IP address with zone is not allowed".into());
@@ -262,6 +276,44 @@ fn cidr_prefix_length(This(this): This<Value>) -> ResolveResult {
 fn cidr_masked(This(this): This<Value>) -> ResolveResult {
     let cidr = extract_cidr(&this)?;
     Ok(Value::Opaque(Arc::new(KubeCIDR(cidr.0.trunc()))))
+}
+
+/// `<CIDR>.ip() -> IP`
+///
+/// Extracts the network address from a CIDR value.
+pub(crate) fn cidr_ip(This(this): This<Value>) -> ResolveResult {
+    let cidr = extract_cidr(&this)?;
+    Ok(Value::Opaque(Arc::new(KubeIP(cidr.0.addr()))))
+}
+
+// --- IP/CIDR version convenience functions ---
+
+/// `isIPv4(<string>) -> bool`
+fn is_ipv4(s: Arc<String>) -> ResolveResult {
+    Ok(Value::Bool(
+        parse_ip_addr(&s).map_or(false, |addr| addr.is_ipv4()),
+    ))
+}
+
+/// `isIPv6(<string>) -> bool`
+fn is_ipv6(s: Arc<String>) -> ResolveResult {
+    Ok(Value::Bool(
+        parse_ip_addr(&s).map_or(false, |addr| addr.is_ipv6()),
+    ))
+}
+
+/// `isCIDRv4(<string>) -> bool`
+fn is_cidr_v4(s: Arc<String>) -> ResolveResult {
+    Ok(Value::Bool(
+        parse_cidr_net(&s).map_or(false, |net| net.addr().is_ipv4()),
+    ))
+}
+
+/// `isCIDRv6(<string>) -> bool`
+fn is_cidr_v6(s: Arc<String>) -> ResolveResult {
+    Ok(Value::Bool(
+        parse_cidr_net(&s).map_or(false, |net| net.addr().is_ipv6()),
+    ))
 }
 
 #[cfg(test)]
@@ -486,5 +538,62 @@ mod tests {
         );
         // Canonical form
         assert_eq!(eval("ip.isCanonical('::1')"), Value::Bool(true));
+    }
+
+    // --- CIDR.ip() tests ---
+
+    #[test]
+    fn test_cidr_ip_v4() {
+        // cidr_ip is tested via dispatch, but also directly
+        let mut ctx = Context::default();
+        register(&mut ctx);
+        crate::dispatch::register(&mut ctx);
+        let result = Program::compile("cidr('192.168.0.0/24').ip() == ip('192.168.0.0')")
+            .unwrap()
+            .execute(&ctx)
+            .unwrap();
+        assert_eq!(result, Value::Bool(true));
+    }
+
+    #[test]
+    fn test_cidr_ip_v6() {
+        let mut ctx = Context::default();
+        register(&mut ctx);
+        crate::dispatch::register(&mut ctx);
+        let result = Program::compile("cidr('fd00::/64').ip() == ip('fd00::')")
+            .unwrap()
+            .execute(&ctx)
+            .unwrap();
+        assert_eq!(result, Value::Bool(true));
+    }
+
+    // --- IP version convenience functions ---
+
+    #[test]
+    fn test_is_ipv4() {
+        assert_eq!(eval("isIPv4('1.2.3.4')"), Value::Bool(true));
+        assert_eq!(eval("isIPv4('::1')"), Value::Bool(false));
+        assert_eq!(eval("isIPv4('not-an-ip')"), Value::Bool(false));
+    }
+
+    #[test]
+    fn test_is_ipv6() {
+        assert_eq!(eval("isIPv6('::1')"), Value::Bool(true));
+        assert_eq!(eval("isIPv6('1.2.3.4')"), Value::Bool(false));
+        assert_eq!(eval("isIPv6('not-an-ip')"), Value::Bool(false));
+    }
+
+    #[test]
+    fn test_is_cidr_v4() {
+        assert_eq!(eval("isCIDRv4('10.0.0.0/8')"), Value::Bool(true));
+        assert_eq!(eval("isCIDRv4('fd00::/64')"), Value::Bool(false));
+        assert_eq!(eval("isCIDRv4('not-a-cidr')"), Value::Bool(false));
+    }
+
+    #[test]
+    fn test_is_cidr_v6() {
+        assert_eq!(eval("isCIDRv6('fd00::/64')"), Value::Bool(true));
+        assert_eq!(eval("isCIDRv6('10.0.0.0/8')"), Value::Bool(false));
+        assert_eq!(eval("isCIDRv6('not-a-cidr')"), Value::Bool(false));
     }
 }

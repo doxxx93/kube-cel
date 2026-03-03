@@ -241,6 +241,14 @@ fn join(This(this): This<Arc<Vec<Value>>>, Arguments(args): Arguments) -> Resolv
     Ok(Value::String(Arc::new(parts.join(&separator))))
 }
 
+/// `<string>.reverse() -> <string>`
+///
+/// Returns a new string with the characters in reverse order.
+pub(crate) fn string_reverse(This(this): This<Arc<String>>) -> ResolveResult {
+    let reversed: String = this.chars().rev().collect();
+    Ok(Value::String(Arc::new(reversed)))
+}
+
 /// `strings.quote(<string>) -> <string>`
 fn strings_quote(s: Arc<String>) -> ResolveResult {
     let escaped = s

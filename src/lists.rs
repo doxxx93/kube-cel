@@ -153,6 +153,11 @@ fn flatten(This(this): This<Arc<Vec<Value>>>) -> ResolveResult {
 ///
 /// Returns a new list with elements in reverse order.
 fn list_reverse(This(this): This<Arc<Vec<Value>>>) -> ResolveResult {
+    list_reverse_value(This(this))
+}
+
+/// Inner reverse implementation callable from dispatch.
+pub(crate) fn list_reverse_value(This(this): This<Arc<Vec<Value>>>) -> ResolveResult {
     let mut result: Vec<Value> = this.iter().cloned().collect();
     result.reverse();
     Ok(Value::List(Arc::new(result)))

@@ -25,6 +25,14 @@ pub fn register(ctx: &mut Context<'_>) {
         ctx.add_function("add", add);
         ctx.add_function("sub", sub);
     }
+
+    // ip: string → parse IP, CIDR → extract network address
+    #[cfg(feature = "ip")]
+    ctx.add_function("ip", ip_dispatch);
+
+    // reverse: string → reversed string, list → reversed list
+    #[cfg(any(feature = "strings", feature = "lists"))]
+    ctx.add_function("reverse", reverse);
 }
 
 // ---------------------------------------------------------------------------
@@ -157,6 +165,60 @@ fn add(This(this): This<Value>, Arguments(args): Arguments) -> ResolveResult {
 #[cfg(feature = "quantity")]
 fn sub(This(this): This<Value>, Arguments(args): Arguments) -> ResolveResult {
     crate::quantity::cel_sub(This(this), Arguments(args))
+}
+
+// ---------------------------------------------------------------------------
+// ip (string → parse IP, CIDR → extract network address)
+// ---------------------------------------------------------------------------
+
+#[cfg(feature = "ip")]
+fn ip_dispatch(This(this): This<Value>, Arguments(args): Arguments) -> ResolveResult {
+    match &this {
+        Value::Opaque(o) if o.downcast_ref::<crate::ip::KubeCIDR>().is_some() => {
+            crate::ip::cidr_ip(This(this))
+        }
+        _ => {
+            // Fallback: treat first argument (or this for global call) as string
+            let s = match args.first() {
+                Some(Value::String(s)) => s.clone(),
+                _ => match this {
+                    Value::String(s) => s,
+                    _ => {
+                        return Err(ExecutionError::function_error(
+                            "ip",
+                            "expected string or CIDR argument",
+                        ));
+                    }
+                },
+            };
+            let addr = crate::ip::parse_ip_addr(&s)
+                .map_err(|e| ExecutionError::function_error("ip", e))?;
+            Ok(Value::Opaque(std::sync::Arc::new(crate::ip::KubeIP::new(
+                addr,
+            ))))
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// reverse (string → reversed string, list → reversed list)
+// ---------------------------------------------------------------------------
+
+#[cfg(any(feature = "strings", feature = "lists"))]
+#[allow(unused_variables)]
+fn reverse(This(this): This<Value>) -> ResolveResult {
+    match this {
+        #[cfg(feature = "strings")]
+        Value::String(s) => crate::strings::string_reverse(This(s)),
+
+        #[cfg(feature = "lists")]
+        Value::List(list) => crate::lists::list_reverse_value(This(list)),
+
+        _ => Err(ExecutionError::function_error(
+            "reverse",
+            format!("reverse not supported on type {:?}", this.type_of()),
+        )),
+    }
 }
 
 #[cfg(test)]
