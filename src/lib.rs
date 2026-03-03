@@ -78,6 +78,9 @@ pub mod named_format;
 #[cfg(feature = "math")]
 pub mod math;
 
+#[cfg(feature = "encoders")]
+pub mod encoders;
+
 #[cfg(feature = "validation")]
 pub mod escaping;
 
@@ -129,6 +132,9 @@ pub fn register_all(ctx: &mut cel::Context<'_>) {
 
     #[cfg(feature = "math")]
     math::register(ctx);
+
+    #[cfg(feature = "encoders")]
+    encoders::register(ctx);
 
     // Must be last: overwrites single-type registrations with unified dispatch
     dispatch::register(ctx);

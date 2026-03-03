@@ -15,6 +15,7 @@ regex = { version = "1", optional = true }
 url = { version = "2", optional = true }
 ipnet = { version = "2", optional = true }
 semver = { version = "1", optional = true }
+base64 = { version = "0.22", optional = true }
 serde = { version = "1", features = ["derive"], optional = true }
 serde_json = { version = "1", optional = true }
 chrono = { version = "0.4", default-features = false, features = ["alloc"], optional = true }
@@ -23,7 +24,7 @@ chrono = { version = "0.4", default-features = false, features = ["alloc"], opti
 unsafe_code = "forbid"
 
 [features]
-default = ["strings", "lists", "sets", "regex_funcs", "urls", "ip", "semver_funcs", "format", "quantity", "jsonpatch", "named_format", "math"]
+default = ["strings", "lists", "sets", "regex_funcs", "urls", "ip", "semver_funcs", "format", "quantity", "jsonpatch", "named_format", "math", "encoders"]
 strings = []
 lists = []
 sets = []
@@ -36,6 +37,7 @@ quantity = []
 jsonpatch = []
 named_format = []
 math = []
+encoders = ["dep:base64"]
 validation = ["dep:serde_json", "dep:serde", "dep:chrono"]
 
 [[example]]
