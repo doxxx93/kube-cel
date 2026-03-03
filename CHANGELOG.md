@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.4.3] - 2026-03-03
+
+### Fixed
+
+- `string()` dispatch no longer overrides cel built-in type conversion — `string(int)`, `string(bool)`, `string(timestamp)`, `string(duration)` now work correctly alongside IP/CIDR `.string()`
+
+### Added
+
+- `justfile` for local pre-publish checks (`just check` runs fmt, clippy, test-all, feature-check, doc)
+
 ## [0.4.2] - 2026-03-03
 
 ### Added
