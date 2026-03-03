@@ -27,7 +27,7 @@ test-no-default:
 feature-check:
     #!/usr/bin/env bash
     set -euo pipefail
-    for feature in strings lists sets regex_funcs urls ip semver_funcs format quantity jsonpatch named_format math encoders; do
+    for feature in strings lists sets regex_funcs urls ip semver_funcs format quantity jsonpatch named_format math encoders validation; do
         echo "--- checking feature: $feature ---"
         cargo check --no-default-features --features "$feature"
     done
@@ -51,11 +51,20 @@ bump version:
     #!/usr/bin/env bash
     set -euo pipefail
     old=$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)"/\1/')
-    sed -i '' 's/^version = ".*"/version = "{{version}}"/' Cargo.toml
-    # Add changelog entry after "# Changelog" line
+    # Cross-platform sed -i (macOS vs GNU)
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+        sed -i '' 's/^version = ".*"/version = "{{version}}"/' Cargo.toml
+    else
+        sed -i 's/^version = ".*"/version = "{{version}}"/' Cargo.toml
+    fi
+    # Add changelog entry
     date=$(date +%Y-%m-%d)
-    entry="\n## [{{version}}] - ${date}\n\n### Added\n\n### Fixed\n\n### Changed\n"
-    sed -i '' "s/^# Changelog$/# Changelog\n${entry}/" CHANGELOG.md
+    entry="## [{{version}}] - ${date}\n\n### Added\n\n### Fixed\n\n### Changed\n"
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+        sed -i '' "s/^# Changelog$/# Changelog\n\n${entry}/" CHANGELOG.md
+    else
+        sed -i "s/^# Changelog$/# Changelog\n\n${entry}/" CHANGELOG.md
+    fi
     echo "Bumped ${old} → {{version}}"
     echo "Edit CHANGELOG.md to fill in release notes"
 
