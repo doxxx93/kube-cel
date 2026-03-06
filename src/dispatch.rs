@@ -326,28 +326,25 @@ fn max_dispatch(This(this): This<Value>, Arguments(args): Arguments) -> ResolveR
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use cel::Program;
+    use cel::{Context, Program, Value};
 
-    #[allow(dead_code)]
+    fn eval(expr: &str) -> Value {
+        let mut ctx = Context::default();
+        crate::register_all(&mut ctx);
+        Program::compile(expr).unwrap().execute(&ctx).unwrap()
+    }
+
     fn eval_err(expr: &str) -> cel::ExecutionError {
         let mut ctx = Context::default();
-        register(&mut ctx);
-        #[cfg(feature = "strings")]
-        crate::strings::register(&mut ctx);
-        #[cfg(feature = "lists")]
-        crate::lists::register(&mut ctx);
-        #[cfg(feature = "semver_funcs")]
-        crate::semver_funcs::register(&mut ctx);
-        #[cfg(feature = "quantity")]
-        crate::quantity::register(&mut ctx);
+        crate::register_all(&mut ctx);
         Program::compile(expr).unwrap().execute(&ctx).unwrap_err()
     }
+
+    // --- Dispatch error tests ---
 
     #[test]
     #[cfg(feature = "strings")]
     fn test_index_of_unsupported_type() {
-        // indexOf on a non-string, non-list type should error
         eval_err("true.indexOf('x')");
     }
 
@@ -373,5 +370,83 @@ mod tests {
     #[cfg(feature = "semver_funcs")]
     fn test_compare_to_unsupported_type() {
         eval_err("'hello'.compareTo('world')");
+    }
+
+    // --- string() conformance: verify our reimplementation matches cel built-in ---
+
+    #[test]
+    #[cfg(feature = "ip")]
+    fn test_string_int() {
+        assert_eq!(eval("42.string()"), Value::String("42".to_string().into()));
+    }
+
+    #[test]
+    #[cfg(feature = "ip")]
+    fn test_string_uint() {
+        assert_eq!(
+            eval("42u.string()"),
+            Value::String("42".to_string().into())
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "ip")]
+    fn test_string_float() {
+        assert_eq!(
+            eval("3.14.string()"),
+            Value::String("3.14".to_string().into())
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "ip")]
+    fn test_string_string() {
+        assert_eq!(
+            eval("'hello'.string()"),
+            Value::String("hello".to_string().into())
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "ip")]
+    fn test_string_bytes() {
+        assert_eq!(
+            eval("b'abc'.string()"),
+            Value::String("abc".to_string().into())
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "ip")]
+    fn test_string_unsupported_type() {
+        // Bool is not supported by cel's built-in string(), neither by ours
+        eval_err("true.string()");
+    }
+
+    // --- min/max dispatch: list method and global variadic coexistence ---
+
+    #[test]
+    #[cfg(feature = "lists")]
+    fn test_min_list_method() {
+        assert_eq!(eval("[3, 1, 2].min()"), Value::Int(1));
+    }
+
+    #[test]
+    #[cfg(feature = "lists")]
+    fn test_max_list_method() {
+        assert_eq!(eval("[3, 1, 2].max()"), Value::Int(3));
+    }
+
+    #[test]
+    #[cfg(feature = "lists")]
+    fn test_min_global_variadic() {
+        // cel built-in variadic min must still work after dispatch
+        assert_eq!(eval("min(5, 3)"), Value::Int(3));
+    }
+
+    #[test]
+    #[cfg(feature = "lists")]
+    fn test_max_global_variadic() {
+        assert_eq!(eval("max(5, 3)"), Value::Int(5));
     }
 }
