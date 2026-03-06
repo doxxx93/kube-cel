@@ -138,11 +138,11 @@ fn is_ip(s: Arc<String>) -> ResolveResult {
 /// `ip.isCanonical(<string>) -> bool`
 ///
 /// Returns true if the string is the canonical form of an IP address.
+/// Errors on invalid IP strings (matches K8s behavior).
 fn ip_is_canonical(s: Arc<String>) -> ResolveResult {
-    Ok(match parse_ip_addr(&s) {
-        Ok(addr) => Value::Bool(addr.to_string() == s.as_str()),
-        Err(_) => Value::Bool(false),
-    })
+    let addr = parse_ip_addr(&s)
+        .map_err(|e| cel::ExecutionError::function_error("ip.isCanonical", e))?;
+    Ok(Value::Bool(addr.to_string() == s.as_str()))
 }
 
 /// `<IP>.family() -> int`
@@ -350,7 +350,8 @@ mod tests {
     #[test]
     fn test_ip_is_canonical() {
         assert_eq!(eval("ip.isCanonical('127.0.0.1')"), Value::Bool(true));
-        assert_eq!(eval("ip.isCanonical('0127.0.0.1')"), Value::Bool(false));
+        // Invalid IP strings now error (matches K8s behavior)
+        eval_err("ip.isCanonical('0127.0.0.1')");
     }
 
     #[test]

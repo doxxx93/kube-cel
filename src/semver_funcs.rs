@@ -29,44 +29,22 @@ pub fn register(ctx: &mut Context<'_>) {
     // isGreaterThan, isLessThan, compareTo registered via dispatch
 }
 
-/// Normalize a version string before parsing:
-/// - Strip leading 'v' or 'V'
-/// - Pad missing minor/patch (e.g., "1" -> "1.0.0", "1.2" -> "1.2.0")
-fn normalize(s: &str) -> String {
-    let s = s
-        .strip_prefix('v')
-        .or_else(|| s.strip_prefix('V'))
-        .unwrap_or(s);
-    let parts: Vec<&str> = s.splitn(2, '-').collect();
-    let version_part = parts[0];
-    let pre_part = parts.get(1);
-
-    let dots: Vec<&str> = version_part.split('.').collect();
-    let normalized = match dots.len() {
-        1 => format!("{}.0.0", dots[0]),
-        2 => format!("{}.{}.0", dots[0], dots[1]),
-        _ => version_part.to_string(),
-    };
-
-    match pre_part {
-        Some(pre) => format!("{normalized}-{pre}"),
-        None => normalized,
-    }
-}
-
 /// `semver(<string>) -> Semver`
+///
+/// Strict parsing: requires exact `Major.Minor.Patch` format.
+/// Rejects v-prefix, partial versions, and leading zeros.
 fn parse_semver(s: Arc<String>) -> ResolveResult {
-    let normalized = normalize(&s);
-    let version = semver::Version::parse(&normalized).map_err(|e| {
+    let version = semver::Version::parse(&s).map_err(|e| {
         ExecutionError::function_error("semver", format!("invalid semver '{s}': {e}"))
     })?;
     Ok(Value::Opaque(Arc::new(KubeSemver(version))))
 }
 
 /// `isSemver(<string>) -> bool`
+///
+/// Strict validation: requires exact `Major.Minor.Patch` format.
 fn is_semver(s: Arc<String>) -> ResolveResult {
-    let normalized = normalize(&s);
-    Ok(Value::Bool(semver::Version::parse(&normalized).is_ok()))
+    Ok(Value::Bool(semver::Version::parse(&s).is_ok()))
 }
 
 /// Helper to extract KubeSemver from an opaque Value.
@@ -143,9 +121,19 @@ mod tests {
     #[test]
     fn test_is_semver() {
         assert_eq!(eval("isSemver('1.2.3')"), Value::Bool(true));
-        assert_eq!(eval("isSemver('v1.2.3')"), Value::Bool(true));
-        assert_eq!(eval("isSemver('1.0')"), Value::Bool(true));
+        assert_eq!(eval("isSemver('1.2.3-beta.1+build.1')"), Value::Bool(true));
         assert_eq!(eval("isSemver('not-a-version')"), Value::Bool(false));
+    }
+
+    #[test]
+    fn test_is_semver_strict_rejects() {
+        // K8s strict mode rejects v-prefix, partial versions, leading zeros, spaces
+        assert_eq!(eval("isSemver('v1.0.0')"), Value::Bool(false));
+        assert_eq!(eval("isSemver('1')"), Value::Bool(false));
+        assert_eq!(eval("isSemver('1.1')"), Value::Bool(false));
+        assert_eq!(eval("isSemver('01.01.01')"), Value::Bool(false));
+        assert_eq!(eval("isSemver(' 1.0.0')"), Value::Bool(false));
+        assert_eq!(eval("isSemver('1.0.0 ')"), Value::Bool(false));
     }
 
     #[test]
@@ -156,15 +144,14 @@ mod tests {
     }
 
     #[test]
-    fn test_leading_v() {
-        assert_eq!(eval("semver('v1.2.3').major()"), Value::Int(1));
+    fn test_semver_strict_rejects_v_prefix() {
+        eval_err("semver('v1.2.3')");
     }
 
     #[test]
-    fn test_pad_missing_components() {
-        assert_eq!(eval("semver('1').major()"), Value::Int(1));
-        assert_eq!(eval("semver('1').minor()"), Value::Int(0));
-        assert_eq!(eval("semver('1.2').patch()"), Value::Int(0));
+    fn test_semver_strict_rejects_partial() {
+        eval_err("semver('1')");
+        eval_err("semver('1.2')");
     }
 
     #[test]
@@ -241,8 +228,8 @@ mod tests {
     }
 
     #[test]
-    fn test_leading_capital_v() {
-        assert_eq!(eval("semver('V1.2.3').major()"), Value::Int(1));
+    fn test_semver_strict_rejects_capital_v() {
+        eval_err("semver('V1.2.3')");
     }
 
     #[test]
@@ -258,12 +245,8 @@ mod tests {
     }
 
     #[test]
-    fn test_partial_version_with_pre_release() {
-        // "1.2-alpha" should pad to "1.2.0-alpha"
-        assert_eq!(
-            eval("semver('1.2-alpha').isLessThan(semver('1.2.0'))"),
-            Value::Bool(true)
-        );
+    fn test_semver_strict_rejects_partial_with_pre_release() {
+        eval_err("semver('1.2-alpha')");
     }
 
     // --- cel-go parity tests ---
