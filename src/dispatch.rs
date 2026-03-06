@@ -24,12 +24,6 @@ pub fn register(ctx: &mut Context<'_>) {
     ctx.add_function("isLessThan", is_less_than);
     ctx.add_function("compareTo", compare_to);
 
-    #[cfg(feature = "quantity")]
-    {
-        ctx.add_function("add", crate::quantity::cel_add);
-        ctx.add_function("sub", crate::quantity::cel_sub);
-    }
-
     // ip: string → parse IP, CIDR → extract network address
     #[cfg(feature = "ip")]
     ctx.add_function("ip", ip_dispatch);

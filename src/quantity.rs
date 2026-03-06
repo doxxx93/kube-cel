@@ -312,7 +312,10 @@ pub fn register(ctx: &mut Context<'_>) {
     ctx.add_function("asInteger", cel_as_integer);
     ctx.add_function("asApproximateFloat", cel_as_approximate_float);
     ctx.add_function("sign", cel_sign);
-    // add, sub, isGreaterThan, isLessThan, compareTo registered via dispatch
+    ctx.add_function("add", cel_add);
+    ctx.add_function("sub", cel_sub);
+    // isGreaterThan, isLessThan, compareTo registered via dispatch
+    // (shared with semver_funcs)
 }
 
 fn extract_quantity(val: &Value) -> Result<&KubeQuantity, ExecutionError> {
